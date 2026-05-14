@@ -76,6 +76,62 @@ let renderConnectedToken = (~expiresAt, ~onDisconnect) => {
   </div>
 }
 
+module APIKeyCard = {
+  @react.component
+  let make = (
+    ~title,
+    ~manageHref,
+    ~emptyPlaceholder,
+    ~description: option<string>=?,
+    ~settings: Types.apiKeySettings,
+    ~apiKey,
+    ~setApiKey,
+    ~save,
+    ~reset,
+  ) =>
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-zinc-100"> {React.string(title)} </span>
+          {renderSourceBadge(settings.source)}
+        </div>
+        <a
+          href=manageHref
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-zinc-400 hover:text-zinc-200"
+        >
+          {React.string("Manage keys")}
+        </a>
+      </div>
+      {switch description {
+      | Some(text) => <div className="mt-2 text-xs text-zinc-500"> {React.string(text)} </div>
+      | None => React.null
+      }}
+      <div className="mt-3 flex items-center gap-3">
+        <Input.Input
+          type_=#password
+          placeholder={apiKeyPlaceholder(settings.source, emptyPlaceholder)}
+          value={apiKey}
+          onChange={e => {
+            let target = ReactEvent.Form.target(e)
+            setApiKey(_ => target["value"])
+            reset()
+          }}
+          className="flex-1 min-w-0"
+        />
+        <Button.Button
+          variant=#secondary
+          onClick={_ => saveApiKey(~key=apiKey, ~save, ~clear=() => setApiKey(_ => ""))}
+          disabled={settings.saveStatus == Types.Saving}
+        >
+          {React.string(saveButtonLabel(settings.saveStatus))}
+        </Button.Button>
+      </div>
+      {renderSaveStatus(settings.saveStatus)}
+    </div>
+}
+
 @react.component
 let make = (~open_: bool, ~onOpenChange: bool => unit, ~initialTab: option<string>=?) => {
   let runtimeConfig = RuntimeConfig.read()
@@ -92,6 +148,7 @@ let make = (~open_: bool, ~onOpenChange: bool => unit, ~initialTab: option<strin
   let (openrouterKey, setOpenrouterKey) = React.useState(() => "")
   let (anthropicKey, setAnthropicKey) = React.useState(() => "")
   let (fireworksKey, setFireworksKey) = React.useState(() => "")
+  let (nvidiaKey, setNvidiaKey) = React.useState(() => "")
   let (oauthCode, setOauthCode) = React.useState(() => "")
   let userProfile = State.useSelector(State.Selectors.userProfile)
   let userEmail = userProfile->Option.map(p => p.email)
@@ -100,6 +157,7 @@ let make = (~open_: bool, ~onOpenChange: bool => unit, ~initialTab: option<strin
   let keySettings = State.useSelector(State.Selectors.openrouterKeySettings)
   let anthropicKeySettings = State.useSelector(State.Selectors.anthropicKeySettings)
   let fireworksKeySettings = State.useSelector(State.Selectors.fireworksKeySettings)
+  let nvidiaKeySettings = State.useSelector(State.Selectors.nvidiaKeySettings)
   let anthropicOAuthStatus = State.useSelector(State.Selectors.anthropicOAuthStatus)
   let chatgptOAuthStatus = State.useSelector(State.Selectors.chatgptOAuthStatus)
 
@@ -108,29 +166,27 @@ let make = (~open_: bool, ~onOpenChange: bool => unit, ~initialTab: option<strin
       State.Actions.fetchApiKeySettings()
       State.Actions.fetchAnthropicApiKeySettings()
       State.Actions.fetchFireworksApiKeySettings()
+      State.Actions.fetchNvidiaApiKeySettings()
       State.Actions.fetchAnthropicOAuthStatus()
       State.Actions.fetchChatGPTOAuthStatus()
       State.Actions.resetOpenRouterKeySaveStatus()
       State.Actions.resetAnthropicKeySaveStatus()
       State.Actions.resetFireworksKeySaveStatus()
+      State.Actions.resetNvidiaKeySaveStatus()
       State.Actions.resetAnthropicOAuthError()
       State.Actions.resetChatGPTOAuthError()
       setOpenrouterKey(_ => "")
       setAnthropicKey(_ => "")
       setFireworksKey(_ => "")
+      setNvidiaKey(_ => "")
       setOauthCode(_ => "")
     }
     None
   }, (open_, acpSession))
 
-  let placeholder = apiKeyPlaceholder(keySettings.source, "Enter OpenRouter API key")
   let anthropicPlaceholder = apiKeyPlaceholder(
     anthropicKeySettings.source,
     "Enter Anthropic API key",
-  )
-  let fireworksPlaceholder = apiKeyPlaceholder(
-    fireworksKeySettings.source,
-    "Enter Fireworks API key",
   )
 
   <Dialog.Dialog open_={open_} onOpenChange={onOpenChange}>
@@ -511,101 +567,38 @@ let make = (~open_: bool, ~onOpenChange: bool => unit, ~initialTab: option<strin
                   <div className="text-sm text-zinc-400">
                     {React.string("Bring your own key")}
                   </div>
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-zinc-100">
-                          {React.string("Fireworks AI")}
-                        </span>
-                        {renderSourceBadge(fireworksKeySettings.source)}
-                      </div>
-
-                      <a
-                        href="https://app.fireworks.ai/api-keys"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-zinc-400 hover:text-zinc-200"
-                      >
-                        {React.string("Manage keys")}
-                      </a>
-                    </div>
-                    <div className="mt-2 text-xs text-zinc-500">
-                      {React.string(
-                        "Use your Fireworks API key with Fire Pass to access Kimi K2.5 Turbo.",
-                      )}
-                    </div>
-                    <div className="mt-3 flex items-center gap-3">
-                      <Input.Input
-                        type_=#password
-                        placeholder={fireworksPlaceholder}
-                        value={fireworksKey}
-                        onChange={e => {
-                          let target = ReactEvent.Form.target(e)
-                          setFireworksKey(_ => target["value"])
-                          State.Actions.resetFireworksKeySaveStatus()
-                        }}
-                        className="flex-1 min-w-0"
-                      />
-                      <Button.Button
-                        variant=#secondary
-                        onClick={_ =>
-                          saveApiKey(
-                            ~key=fireworksKey,
-                            ~save=key => State.Actions.saveFireworksKey(~key),
-                            ~clear=() => setFireworksKey(_ => ""),
-                          )}
-                        disabled={fireworksKeySettings.saveStatus == Types.Saving}
-                      >
-                        {React.string(saveButtonLabel(fireworksKeySettings.saveStatus))}
-                      </Button.Button>
-                    </div>
-                    {renderSaveStatus(fireworksKeySettings.saveStatus)}
-                  </div>
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-zinc-100">
-                          {React.string("OpenRouter")}
-                        </span>
-                        {renderSourceBadge(keySettings.source)}
-                      </div>
-
-                      <a
-                        href="https://openrouter.ai/keys"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs text-zinc-400 hover:text-zinc-200"
-                      >
-                        {React.string("Manage keys")}
-                      </a>
-                    </div>
-                    <div className="mt-3 flex items-center gap-3">
-                      <Input.Input
-                        type_=#password
-                        placeholder={placeholder}
-                        value={openrouterKey}
-                        onChange={e => {
-                          let target = ReactEvent.Form.target(e)
-                          setOpenrouterKey(_ => target["value"])
-                          State.Actions.resetOpenRouterKeySaveStatus()
-                        }}
-                        className="flex-1 min-w-0"
-                      />
-                      <Button.Button
-                        variant=#secondary
-                        onClick={_ =>
-                          saveApiKey(
-                            ~key=openrouterKey,
-                            ~save=key => State.Actions.saveOpenRouterKey(~key),
-                            ~clear=() => setOpenrouterKey(_ => ""),
-                          )}
-                        disabled={keySettings.saveStatus == Types.Saving}
-                      >
-                        {React.string(saveButtonLabel(keySettings.saveStatus))}
-                      </Button.Button>
-                    </div>
-                    {renderSaveStatus(keySettings.saveStatus)}
-                  </div>
+                  <APIKeyCard
+                    title="NVIDIA"
+                    manageHref="https://build.nvidia.com/settings/api-keys"
+                    emptyPlaceholder="Enter NVIDIA API key"
+                    description="Use your NVIDIA API key to access NVIDIA-hosted models."
+                    settings=nvidiaKeySettings
+                    apiKey=nvidiaKey
+                    setApiKey=setNvidiaKey
+                    save={key => State.Actions.saveNvidiaKey(~key)}
+                    reset={State.Actions.resetNvidiaKeySaveStatus}
+                  />
+                  <APIKeyCard
+                    title="Fireworks AI"
+                    manageHref="https://app.fireworks.ai/api-keys"
+                    emptyPlaceholder="Enter Fireworks API key"
+                    description="Use your Fireworks API key with Fire Pass to access Kimi K2.5 Turbo."
+                    settings=fireworksKeySettings
+                    apiKey=fireworksKey
+                    setApiKey=setFireworksKey
+                    save={key => State.Actions.saveFireworksKey(~key)}
+                    reset={State.Actions.resetFireworksKeySaveStatus}
+                  />
+                  <APIKeyCard
+                    title="OpenRouter"
+                    manageHref="https://openrouter.ai/keys"
+                    emptyPlaceholder="Enter OpenRouter API key"
+                    settings=keySettings
+                    apiKey=openrouterKey
+                    setApiKey=setOpenrouterKey
+                    save={key => State.Actions.saveOpenRouterKey(~key)}
+                    reset={State.Actions.resetOpenRouterKeySaveStatus}
+                  />
                 </div>}
           </div>
         </div>

@@ -19,6 +19,18 @@ module TestHelpers = {
     ->Task.newToLoaded(~id, ~title)
     ->Task.updateLoadedData(data => {...data, messages, isAgentRunning})
 
+  let makeStateWithTasks = (
+    ~tasks,
+    ~currentTask,
+    ~sessionsLoadState=Client__State__Types.SessionsNotLoaded,
+  ) => {
+    ...Reducer.defaultState,
+    tasks,
+    currentTask,
+    selectedModelValue: None,
+    sessionsLoadState,
+  }
+
   let makeStateWithTask = (
     ~taskId="test-task-1",
     ~messages=[],
@@ -37,37 +49,7 @@ module TestHelpers = {
     let tasks = Dict.make()
     tasks->Dict.set(taskId, task)
 
-    (
-      {
-        tasks,
-        currentTask: Task.Selected(taskId),
-        acpSession: NoAcpSession,
-        sessionInitialized: false,
-        usageInfo: None,
-        userProfile: None,
-        openrouterKeySettings: {
-          source: Client__State__Types.None,
-          saveStatus: Client__State__Types.Idle,
-        },
-        anthropicKeySettings: {
-          source: Client__State__Types.None,
-          saveStatus: Client__State__Types.Idle,
-        },
-        fireworksKeySettings: {
-          source: Client__State__Types.None,
-          saveStatus: Client__State__Types.Idle,
-        },
-        anthropicOAuthStatus: Client__State__Types.NotConnected,
-        chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-        configOptions: None,
-        selectedModelValue: None,
-        pendingProviderAutoSelect: None,
-        sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-        updateInfo: None,
-        updateCheckStatus: UpdateNotChecked,
-        updateBannerDismissed: false,
-      }: Client__State__Types.state
-    )
+    makeStateWithTasks(~tasks, ~currentTask=Task.Selected(taskId))
   }
 
   let getMessages = Reducer.Selectors.messages
@@ -741,35 +723,7 @@ describe("Client State Reducer - Task Management Actions", () => {
     tasks->Dict.set("task-1", task1)
     tasks->Dict.set("task-2", task2)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-1"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(~tasks, ~currentTask=Task.Selected("task-1"))
 
     let (nextState, _) = Reducer.next(state, SwitchTask({taskId: "task-2"}))
 
@@ -814,35 +768,7 @@ describe("Client State Reducer - Task Management Actions", () => {
     let tasks = Dict.make()
     tasks->Dict.set("task-1", task1)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-1"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(~tasks, ~currentTask=Task.Selected("task-1"))
 
     let (nextState, _) = Reducer.next(state, DeleteTask({taskId: "task-1"}))
 
@@ -874,35 +800,7 @@ describe("Client State Reducer - Task Management Actions", () => {
     let tasks = Dict.make()
     tasks->Dict.set("task-1", task1)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-1"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(~tasks, ~currentTask=Task.Selected("task-1"))
 
     // Delete the only task
     let (stateAfterDelete, _) = Reducer.next(state, DeleteTask({taskId: "task-1"}))
@@ -955,35 +853,7 @@ describe("Client State Reducer - Task Management Actions", () => {
     let tasks = Dict.make()
     tasks->Dict.set("task-1", task1)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-1"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(~tasks, ~currentTask=Task.Selected("task-1"))
 
     // Add message to task 1
     let (state1, effects1) = Reducer.next(
@@ -1086,35 +956,7 @@ describe("Client State Reducer - Session Loading Actions", () => {
     let tasks = Dict.make()
     tasks->Dict.set("session-1", existingTask)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-1"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsNotLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(~tasks, ~currentTask=Task.Selected("task-1"))
 
     // Load sessions including one with the same ID as existing task
     let sessions: array<FrontmanAiFrontmanProtocol.FrontmanProtocol__ACP.sessionSummary> = [
@@ -1189,35 +1031,11 @@ describe("Client State Reducer - Session Loading Actions", () => {
     let tasks = Dict.make()
     tasks->Dict.set("task-123", loadingTask)
 
-    let state: Reducer.state = {
-      tasks,
-      currentTask: Task.Selected("task-123"),
-      acpSession: NoAcpSession,
-      sessionInitialized: false,
-      usageInfo: None,
-      userProfile: None,
-      openrouterKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      fireworksKeySettings: {
-        source: Client__State__Types.None,
-        saveStatus: Client__State__Types.Idle,
-      },
-      anthropicOAuthStatus: Client__State__Types.NotConnected,
-      chatgptOAuthStatus: Client__State__Types.ChatGPTNotConnected,
-      configOptions: None,
-      selectedModelValue: None,
-      pendingProviderAutoSelect: None,
-      sessionsLoadState: Client__State__Types.SessionsLoaded,
-      updateInfo: None,
-      updateCheckStatus: UpdateNotChecked,
-      updateBannerDismissed: false,
-    }
+    let state = TestHelpers.makeStateWithTasks(
+      ~tasks,
+      ~currentTask=Task.Selected("task-123"),
+      ~sessionsLoadState=Client__State__Types.SessionsLoaded,
+    )
 
     let (nextState, _effects) = Reducer.next(
       state,
@@ -1449,6 +1267,7 @@ describe("Client State Reducer - Annotations on Messages", () => {
       (OpenRouter, "openrouter"),
       (Anthropic, "anthropic"),
       (Fireworks, "fireworks"),
+      (Nvidia, "nvidia"),
     ]
 
     let _settingsForProvider = (
@@ -1459,6 +1278,7 @@ describe("Client State Reducer - Annotations on Messages", () => {
       | OpenRouter => state.openrouterKeySettings
       | Anthropic => state.anthropicKeySettings
       | Fireworks => state.fireworksKeySettings
+      | Nvidia => state.nvidiaKeySettings
       }
 
     test(
@@ -1535,7 +1355,7 @@ describe("Client State Reducer - Annotations on Messages", () => {
             t->expect(_settingsForProvider(savedState, provider).saveStatus)->Expect.toEqual(Saved)
             switch provider {
             | OpenRouter => t->expect(effects->Array.length)->Expect.toBe(1)
-            | Anthropic | Fireworks => t->expect(effects->Array.length)->Expect.toBe(0)
+            | Anthropic | Fireworks | Nvidia => t->expect(effects->Array.length)->Expect.toBe(0)
             }
 
             let (failedState, _effects) = Reducer.next(
@@ -1588,6 +1408,7 @@ describe("Client State Reducer - Annotations on Messages", () => {
         t->expect(nextState.openrouterKeySettings.source)->Expect.toEqual(Client__State__Types.None)
         t->expect(nextState.anthropicKeySettings.source)->Expect.toEqual(FromEnv)
         t->expect(nextState.fireworksKeySettings.source)->Expect.toEqual(Client__State__Types.None)
+        t->expect(nextState.nvidiaKeySettings.source)->Expect.toEqual(Client__State__Types.None)
       },
     )
   })
