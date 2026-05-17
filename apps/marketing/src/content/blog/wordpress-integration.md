@@ -79,6 +79,6 @@ That said, this is experimental software. If you choose to use it in production,
 
 ### Getting Started
 
-Until Frontman is available in the WordPress marketplace, install the release zip from the [v0.15.0 GitHub release](https://github.com/frontman-ai/frontman/releases/tag/v0.15.0) using the `/wp-admin` Plugins → "Upload Plugin" feature.
+Frontman is now available in the [WordPress Plugin Directory](https://wordpress.org/plugins/frontman-agentic-ai-editor/). Install it from **Plugins → Add New Plugin** in wp-admin. If you need a specific artifact, the release ZIP is still available from the [GitHub releases page](https://github.com/frontman-ai/frontman/releases).
 
 We're excited to bring Frontman to the WordPress ecosystem. This is just the beginning, and with your help, it'll get a lot better.

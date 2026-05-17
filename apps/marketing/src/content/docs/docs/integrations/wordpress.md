@@ -15,17 +15,28 @@ The Frontman WordPress plugin adds an AI agent directly to your WordPress site. 
 
 ## Installation
 
-### Option A: Upload via WordPress Admin
+### Recommended: Install from the WordPress Plugin Directory
 
-1. Download the latest `frontman.zip` from the [GitHub releases page](https://github.com/frontman-ai/frontman/releases).
+Install Frontman from the WordPress store in wp-admin. This is the preferred installation method because WordPress handles the normal plugin install and update flow.
+
+1. In your WordPress admin, go to **Plugins → Add New Plugin**.
+2. Search for **Frontman Agentic AI Editor**, or open the [Frontman plugin page](https://wordpress.org/plugins/frontman-agentic-ai-editor/).
+3. Click **Install Now**.
+4. Click **Activate Plugin**.
+
+### Alternative: Upload a GitHub Release ZIP
+
+Use this if you need to pin a specific version, audit the release artifact, or install through a controlled deployment process.
+
+1. Download the latest plugin ZIP from the [GitHub releases page](https://github.com/frontman-ai/frontman/releases).
 2. In your WordPress admin, go to **Plugins → Add New Plugin → Upload Plugin**.
 3. Choose the ZIP file and click **Install Now**.
 4. Click **Activate Plugin**.
 
-### Option B: Manual Upload
+### Alternative: Manual Upload
 
-1. Download and unzip `frontman.zip`.
-2. Upload the `frontman/` folder to `/wp-content/plugins/` via FTP or your host's file manager.
+1. Download and unzip the plugin ZIP.
+2. Upload the `frontman-agentic-ai-editor/` folder to `/wp-content/plugins/` via FTP or your host's file manager.
 3. In your WordPress admin, go to **Plugins** and activate **Frontman - Agentic AI Editor**.
 
 ## Configuration

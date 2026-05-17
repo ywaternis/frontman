@@ -26,7 +26,7 @@ Start here if Frontman isn't running in your project yet.
 | **Astro** | `astro add @frontman-ai/astro` | [Astro integration →](/docs/integrations/astro/) |
 | **Next.js** | `npx @frontman-ai/nextjs install` | [Next.js integration →](/docs/integrations/nextjs/) |
 | **Vite** | `npx @frontman-ai/vite install` | [Vite integration →](/docs/integrations/vite/) |
-| **WordPress** | Standalone binary (beta) | [WordPress setup →](/docs/integrations/wordpress/) |
+| **WordPress** | WordPress Plugin Directory (beta) | [WordPress setup →](/docs/integrations/wordpress/) |
 
 Then continue with:
 
