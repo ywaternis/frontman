@@ -1,6 +1,6 @@
 ---
 title: WordPress (Beta)
-description: Install and configure the Frontman WordPress plugin to edit posts, blocks, menus, templates, widgets, site settings, and a Frontman-managed child theme through a conversational AI interface.
+description: Install the Frontman WordPress plugin to edit posts, blocks, Elementor pages, menus, templates, widgets, and site settings through a conversational AI interface.
 ---
 
 The Frontman WordPress plugin adds an AI agent directly to your WordPress site. Navigate to `/frontman`, describe what you want to change, and the agent handles the supported workflow inside the site preview — no code editor or terminal required for those supported changes.
@@ -33,23 +33,6 @@ Use this if you need to pin a specific version, audit the release artifact, or i
 3. Choose the ZIP file and click **Install Now**.
 4. Click **Activate Plugin**.
 
-### Alternative: Manual Upload
-
-1. Download and unzip the plugin ZIP.
-2. Upload the `frontman-agentic-ai-editor/` folder to `/wp-content/plugins/` via FTP or your host's file manager.
-3. In your WordPress admin, go to **Plugins** and activate **Frontman - Agentic AI Editor**.
-
-## Configuration
-
-After activation, go to **Frontman → Settings** in the WordPress admin sidebar.
-
-| Setting | Description |
-|---------|-------------|
-| **Anthropic API key** | Your `sk-ant-...` key from [console.anthropic.com](https://console.anthropic.com). Optional — Frontman provides access by default. |
-| **OpenRouter API key** | Your `sk-or-v1-...` key from [openrouter.ai](https://openrouter.ai). Optional alternative to Anthropic. |
-
-API keys are optional. If you leave them blank, the plugin connects to the Frontman API without a custom key.
-
 ## Using Frontman
 
 1. Make sure you're logged in to WordPress as an admin.
@@ -63,18 +46,12 @@ You can also open Frontman while browsing any page — just append `/frontman` t
 
 - Create, edit, and delete posts and pages
 - Insert, update, move, and delete Gutenberg blocks
+- Edit Elementor pages with Elementor-aware tools
 - Add and update navigation menu items
 - Read and change site options (title, tagline, permalinks, etc.)
 - Browse and update block templates and template parts
 - Manage widgets
-- Inspect theme and plugin files with read-only file tools
-- Create and activate a Frontman-managed child theme for safe CSS, HTML, and JSON edits on block themes
-- Fork supported parent-theme files into that managed child theme before editing them
 - Flush the WordPress cache
-
-All file inspection is scoped to your WordPress root directory. Direct writes to unmanaged theme and plugin files are not available. File creation and editing are limited to the Frontman-managed child theme.
-
-The managed child-theme workflow is available when your active theme is a block-theme parent theme. If another child theme is already active, or if the active theme is not a block theme, Frontman will inspect it read-only and you will need to migrate changes manually.
 
 ## Security
 
