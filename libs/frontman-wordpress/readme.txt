@@ -4,11 +4,11 @@ Tags: ai, editing, content, gutenberg, blocks
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.17.2
+Stable tag: 0.18.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-AI agent for WordPress that edits posts, blocks, menus, templates, site options, and Elementor pages from a conversational UI.
+AI agent for WordPress that edits posts, blocks, menus, templates, site options, Elementor pages, and WooCommerce stores from a conversational UI.
 
 == Description ==
 
@@ -16,7 +16,7 @@ Watch Frontman in action:
 
 https://www.youtube.com/watch?v=-4GD1GYwH8Y
 
-Agentic AI puts an AI agent inside your WordPress site. Navigate to `/frontman`, describe what you want to change, and the agent handles the supported workflow — posts, pages, blocks, menus, templates, site settings, and more.
+Agentic AI puts an AI agent inside your WordPress site. Navigate to `/frontman`, describe what you want to change, and the agent handles the supported workflow — posts, pages, blocks, menus, templates, site settings, WooCommerce store operations, and more.
 
 No code editor. No terminal. Just a chat interface alongside a live view of your site.
 
@@ -25,12 +25,12 @@ No code editor. No terminal. Just a chat interface alongside a live view of your
 * Create, edit, and delete posts and pages
 * Insert, update, and rearrange Gutenberg blocks
 * Edit Elementor pages with complete Elementor support and versioning
+* Manage WooCommerce products, orders, customers, coupons, shipping, taxes, reports, settings, and store data when WooCommerce is active
 * Update navigation menus and menu items
 * Read and change site options (title, tagline, permalinks, etc.)
 * Browse block templates and template parts
-* Search and read files across your WordPress installation
 
-Frontman supports WordPress content workflows across Gutenberg, templates, menus, site options, and Elementor pages.
+Frontman supports WordPress content workflows across Gutenberg, templates, menus, site options, Elementor pages, and WooCommerce stores.
 
 **Who it's for:**
 
@@ -49,14 +49,14 @@ This is an experimental release. It works, but it hasn't been tested across ever
 1. Download the Frontman plugin release ZIP or upload the `frontman-agentic-ai-editor` folder to `/wp-content/plugins/`
 2. Activate the plugin through the **Plugins** menu
 3. Navigate to `/frontman` on your site (you must be logged in as an admin)
-4. Use Frontman - WordPress tools, file inspection, and Elementor editing now run directly inside the plugin
+4. Use Frontman - WordPress tools, Elementor editing, and WooCommerce tools now run directly inside the plugin
 
 == Frequently Asked Questions ==
 
 
 = Do I need another server? =
 
-No. Frontman now runs the WordPress tools, file inspection tools, and Elementor editing tools directly in PHP inside the plugin.
+No. Frontman now runs the WordPress tools, Elementor editing tools, and WooCommerce tools directly in PHP inside the plugin.
 
 = Is it safe? =
 
@@ -68,7 +68,7 @@ Technically, yes — unlike the JavaScript framework integrations, the WordPress
 
 = Which themes work? =
 
-Frontman's content, menu, widget, option, Elementor, and inspection tools work across WordPress themes.
+Frontman's content, menu, widget, option, Elementor, and WooCommerce tools work across WordPress themes.
 
 == Third-Party Services ==
 
@@ -82,7 +82,7 @@ The chat interface is loaded from `https://app.frontman.sh`. This serves the Jav
 * Privacy Policy: [https://frontman.sh/terms](https://frontman.sh/terms)
 
 **Frontman API (api.frontman.sh)**
-The plugin connects via WebSocket to `wss://api.frontman.sh` for AI agent communication — sending tool results and receiving agent responses. Your site content is sent to this service when the agent processes requests.
+The plugin connects via WebSocket to `wss://api.frontman.sh` for AI agent communication — sending tool results and receiving agent responses. Your site content and, when you use WooCommerce tools, store data such as products, orders, customers, coupons, reports, and settings are sent to this service when the agent processes requests.
 
 * Service URL: [https://api.frontman.sh](https://api.frontman.sh)
 * Provider: Frontman AI
@@ -98,6 +98,9 @@ Loading the Frontman UI requests hosted client assets. Your site content is not 
 1. The Frontman chat interface alongside your WordPress site
 
 == Changelog ==
+
+= 0.18.0 =
+* Add WooCommerce tools for products, orders, customers, shipping, taxes, coupons, reports, settings, system status, and store data when WooCommerce is active
 
 = 0.17.2 =
 * Improve Elementor editing tool guidance and recovery errors for non-empty settings diffs and full-tree updates
