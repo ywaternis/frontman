@@ -4,7 +4,7 @@ Tags: ai, editing, content, gutenberg, blocks
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 0.18.0
+Stable tag: 0.18.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,9 @@ Loading the Frontman UI requests hosted client assets. Your site content is not 
 1. The Frontman chat interface alongside your WordPress site
 
 == Changelog ==
+
+= 0.18.1 =
+* Preserve existing WordPress page templates when saving or rolling back Elementor page data, and report any template side effect in Elementor tool responses
 
 = 0.18.0 =
 * Add WooCommerce tools for products, orders, customers, shipping, taxes, coupons, reports, settings, system status, and store data when WooCommerce is active

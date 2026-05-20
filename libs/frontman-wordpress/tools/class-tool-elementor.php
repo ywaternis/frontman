@@ -323,9 +323,9 @@ class Frontman_Tool_Elementor {
 		if ( null !== $rollback ) {
 			Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
 		}
-		$this->save_elementor_data( $post_id, $data );
+		$save_result = $this->save_elementor_data( $post_id, $data );
 
-		return [ 'success' => true, 'post_id' => $post_id, 'sections' => count( $data ), 'rollback_id' => $rollback['rollback_id'] ?? null ];
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'sections' => count( $data ), 'rollback_id' => $rollback['rollback_id'] ?? null ], $save_result );
 	}
 
 	public function get_element( array $input ): array {
@@ -405,8 +405,8 @@ class Frontman_Tool_Elementor {
 		}
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'rollback_id' => $rollback['rollback_id'] ];
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'rollback_id' => $rollback['rollback_id'] ], $save_result );
 	}
 
 	private function has_update_shortcut( array $input ): bool {
@@ -509,8 +509,8 @@ class Frontman_Tool_Elementor {
 		}
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [
 			'success'           => true,
 			'post_id'           => $post_id,
 			'element_id'        => $element_id,
@@ -518,7 +518,7 @@ class Frontman_Tool_Elementor {
 			'matches_before'    => $matches,
 			'matches_remaining' => substr_count( $updated_html, $old_html ),
 			'rollback_id'       => $rollback['rollback_id'],
-		];
+		], $save_result );
 	}
 
 	public function add_element( array $input ): array {
@@ -541,8 +541,8 @@ class Frontman_Tool_Elementor {
 		$this->validate_full_element_tree( $data );
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element['id'] ?? '', 'rollback_id' => $rollback['rollback_id'] ];
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element['id'] ?? '', 'rollback_id' => $rollback['rollback_id'] ], $save_result );
 	}
 
 	public function remove_element( array $input ): array {
@@ -565,8 +565,8 @@ class Frontman_Tool_Elementor {
 		}
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'rollback_id' => $rollback['rollback_id'] ];
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'rollback_id' => $rollback['rollback_id'] ], $save_result );
 	}
 
 	public function list_rollbacks( array $input ): array {
@@ -603,8 +603,8 @@ class Frontman_Tool_Elementor {
 		}
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'new_element_id' => $new_id, 'rollback_id' => $rollback['rollback_id'] ];
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'new_element_id' => $new_id, 'rollback_id' => $rollback['rollback_id'] ], $save_result );
 	}
 
 	public function move_element( array $input ): array {
@@ -619,8 +619,8 @@ class Frontman_Tool_Elementor {
 		}
 
 		Frontman_Elementor_Data::save_rollback( $post_id, $rollback );
-		$this->save_elementor_data( $post_id, $data );
-		return [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'parent_id' => $parent_id, 'position' => $position, 'rollback_id' => $rollback['rollback_id'] ];
+		$save_result = $this->save_elementor_data( $post_id, $data );
+		return $this->append_save_result( [ 'success' => true, 'post_id' => $post_id, 'element_id' => $element_id, 'parent_id' => $parent_id, 'position' => $position, 'rollback_id' => $rollback['rollback_id'] ], $save_result );
 	}
 
 	public function generate_element( array $input ): array {
@@ -694,12 +694,20 @@ class Frontman_Tool_Elementor {
 		return $rollback_id;
 	}
 
-	private function save_elementor_data( int $post_id, array $data ): void {
+	private function save_elementor_data( int $post_id, array $data ): array {
 		try {
-			Frontman_Elementor_Data::save_page_data( $post_id, $data );
+			return Frontman_Elementor_Data::save_page_data( $post_id, $data );
 		} catch ( \Throwable $e ) {
 			throw new Frontman_Tool_Error( 'Failed to save Elementor data: ' . $e->getMessage() );
 		}
+	}
+
+	private function append_save_result( array $response, array $save_result ): array {
+		if ( isset( $save_result['page_template_change'] ) ) {
+			$response['page_template_change'] = $save_result['page_template_change'];
+		}
+
+		return $response;
 	}
 
 	private function require_page_data( int $post_id ): array {
