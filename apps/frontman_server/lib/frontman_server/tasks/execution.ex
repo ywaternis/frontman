@@ -22,9 +22,10 @@ defmodule FrontmanServer.Tasks.Execution do
 
   alias FrontmanServer.Accounts
   alias FrontmanServer.Accounts.Scope
+  alias FrontmanServer.Frameworks
   alias FrontmanServer.Observability.TelemetryEvents
   alias FrontmanServer.Providers
-  alias FrontmanServer.Tasks.Execution.{Framework, RootAgent, ToolExecutor}
+  alias FrontmanServer.Tasks.Execution.{RootAgent, ToolExecutor}
   alias FrontmanServer.Tasks.{Interaction, Task}
   alias FrontmanServer.Tools
 
@@ -78,7 +79,7 @@ defmodule FrontmanServer.Tasks.Execution do
           |> maybe_enable_prompt_cache(api_key_info.provider)
 
         task_id = task.task_id
-        agent = build_agent(task, tools, model_spec, llm_opts, task.framework)
+        agent = build_agent(task, tools, model_spec, llm_opts, task.framework, opts)
 
         messages =
           task.interactions
@@ -107,7 +108,7 @@ defmodule FrontmanServer.Tasks.Execution do
                  interaction_id: Keyword.get(opts, :interaction_id)
                },
                tool_executor: tool_executor,
-               tool_execution_mode: tool_execution_mode(task.framework)
+               tool_execution_mode: Frameworks.tool_execution_mode(task.framework)
              ) do
           {:ok, pid} ->
             {:ok, pid}
@@ -155,12 +156,7 @@ defmodule FrontmanServer.Tasks.Execution do
 
   defp maybe_enable_prompt_cache(opts, _provider), do: opts
 
-  defp tool_execution_mode(%Framework{id: :wordpress}), do: :serial
-  defp tool_execution_mode(_framework), do: :parallel
-
-  defp build_agent(%Task{} = task, tools, model_spec, llm_opts, %Framework{} = fw) do
-    has_typescript_react = Framework.has_typescript_react?(fw)
-
+  defp build_agent(%Task{} = task, tools, model_spec, llm_opts, %Frameworks{} = fw, opts) do
     # Derive prompt data from task interactions
     project_rules =
       task.interactions
@@ -177,7 +173,7 @@ defmodule FrontmanServer.Tasks.Execution do
     RootAgent.new(
       tools: tools,
       has_annotations: Interaction.has_annotations?(task.interactions),
-      has_typescript_react: has_typescript_react,
+      project_traits: Keyword.get(opts, :project_traits, []),
       framework: fw,
       model: model_spec,
       llm_opts: llm_opts,

@@ -165,12 +165,15 @@ defmodule FrontmanServerWeb.TaskChannelTest do
         build_prompt_request(
           _meta: %{
             "openrouterKeyValue" => "sk-or-test",
-            "model" => %{"provider" => "openrouter", "value" => "openai/gpt-5.5"}
+            "model" => %{"provider" => "openrouter", "value" => "openai/gpt-5.5"},
+            "traits" => ["react", "typescript"]
           }
         )
       )
 
-      :sys.get_state(socket.channel_pid)
+      %{assigns: assigns} = :sys.get_state(socket.channel_pid)
+
+      assert Keyword.fetch!(assigns.last_execution_opts, :project_traits) == [:react, :typescript]
 
       assert_enqueued(
         worker: GenerateTitle,
@@ -521,6 +524,17 @@ defmodule FrontmanServerWeb.TaskChannelTest do
         "jsonrpc" => "2.0",
         "method" => "notifications/initialized"
       })
+    end
+
+    test "wordpress completes after tools/list without filesystem tool calls", %{scope: scope} do
+      {socket, _task_id} = join_task_channel(scope, framework: "wordpress")
+
+      complete_mcp_handshake(socket, load_project_context: false)
+
+      refute_push("mcp:message", %{"method" => "tools/call"})
+
+      channel_socket = :sys.get_state(socket.channel_pid)
+      assert channel_socket.assigns.mcp_status == :ready
     end
   end
 
