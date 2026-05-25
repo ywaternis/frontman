@@ -45,7 +45,7 @@ defmodule FrontmanServerWeb.TaskChannel do
         # Each websocket connection needs its own MCP session because:
         # 1. MCPInitializer performs a stateful handshake with the browser-side MCP client
         # 2. Project rules loading depends on client-specific context
-        # Tools are stored in socket assigns and passed through Backend.Context for agent access.
+        # Tools are stored in socket assigns for LLM availability and browser routing.
         #
         # Note: Phoenix channels prohibit push() during join/3, so we defer
         # the initial MCP request push to handle_info(:start_mcp_init).
@@ -216,7 +216,7 @@ defmodule FrontmanServerWeb.TaskChannel do
       end
 
     mcp_tools = socket.assigns[:mcp_tools] || []
-    all_tools = mcp_tools |> Tools.prepare_for_task(task_id)
+    all_tools = Tools.prepare_for_task(mcp_tools, task_id)
 
     opts = execution_opts(socket, model, mcp_tools)
 
@@ -458,7 +458,7 @@ defmodule FrontmanServerWeb.TaskChannel do
     end
   end
 
-  defp process_prompt(id, params, socket) do
+  defp process_prompt(id, %{"prompt" => prompt_content} = params, socket) do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
     mcp_tools = socket.assigns[:mcp_tools] || []
@@ -467,23 +467,19 @@ defmodule FrontmanServerWeb.TaskChannel do
     socket = assign(socket, :scope, scope)
 
     model = extract_model_from_params(params)
-    prompt = ACP.parse_prompt_params(params)
 
-    Logger.info("Received prompt for task #{task_id}: #{prompt.text_summary}")
+    text_summary =
+      prompt_content
+      |> Enum.filter(&(&1["type"] == "text"))
+      |> Enum.map_join("\n", &(&1["text"] || ""))
 
-    if prompt.has_resources do
-      Logger.info("Prompt includes embedded context")
-    end
+    Logger.info("process_prompt", %{task_id: task_id, model: model, text_summary: text_summary})
 
-    if model do
-      Logger.info("Using model: #{model}")
-    end
-
-    all_tools = mcp_tools |> Tools.prepare_for_task(task_id)
+    all_tools = Tools.prepare_for_task(mcp_tools, task_id)
 
     opts = execution_opts(socket, model, mcp_tools)
 
-    case Tasks.submit_user_message(scope, task_id, prompt.content, all_tools, opts) do
+    case Tasks.submit_user_message(scope, task_id, prompt_content, all_tools, opts) do
       {:error, :already_running} ->
         Logger.info("Rejected prompt — agent already running for task #{task_id}")
         error_response = JsonRpc.error_response(id, -32_000, "Agent already running")
@@ -501,7 +497,7 @@ defmodule FrontmanServerWeb.TaskChannel do
 
         Logger.info("User message added, agent spawned for task #{task_id}")
 
-        Tasks.enqueue_title_generation(scope, task_id, prompt.text_summary, model: model)
+        Tasks.enqueue_title_generation(scope, task_id, text_summary, model: model)
 
         {:noreply, socket}
 
@@ -527,8 +523,6 @@ defmodule FrontmanServerWeb.TaskChannel do
       :error -> nil
     end
   end
-
-  defp extract_model_from_params(_), do: nil
 
   @impl true
   def handle_info({:start_mcp_init, actions}, socket) do
@@ -652,7 +646,7 @@ defmodule FrontmanServerWeb.TaskChannel do
       task_id = socket.assigns.task_id
       opts = socket.assigns[:last_execution_opts] || []
       mcp_tools = socket.assigns[:mcp_tools] || []
-      all_tools = mcp_tools |> Tools.prepare_for_task(task_id)
+      all_tools = Tools.prepare_for_task(mcp_tools, task_id)
       Tasks.maybe_start_execution(scope, task_id, all_tools, opts)
     end
 
@@ -743,7 +737,7 @@ defmodule FrontmanServerWeb.TaskChannel do
       Tasks.add_agent_retry(scope, task_id, retried_error_id)
       opts = socket.assigns[:last_execution_opts] || []
       mcp_tools = socket.assigns[:mcp_tools] || []
-      all_tools = mcp_tools |> Tools.prepare_for_task(task_id)
+      all_tools = Tools.prepare_for_task(mcp_tools, task_id)
       Tasks.maybe_start_execution(scope, task_id, all_tools, opts)
     end
 

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Add a backend `get_tool_result` tool for retrieving stored tool results by tool call ID.
+
+### Changed
+
+- Replace consumed tool result payloads with an omitted-data placeholder that points agents to `get_tool_result`.
+
 ### Fixed
 
 - Fix Vitest 4 coverage test runs by aligning Vitest dependency versions and updating hook callbacks for Vitest 4.
