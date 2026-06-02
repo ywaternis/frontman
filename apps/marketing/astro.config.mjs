@@ -1,4 +1,4 @@
-import { defineConfig } from "astro/config"; // force rebuild // force rebuild
+import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
 import icon from "astro-icon";
 import sitemap from "@astrojs/sitemap";
@@ -108,14 +108,6 @@ function validateDocsDescriptions() {
 export default defineConfig({
   site: "https://frontman.sh",
   trailingSlash: "always",
-  redirects: {
-    "/blog/gpt-5.4-support": "/blog/gpt-54-support/",
-    "/blog/mobile-app": "/blog/ai-coding-agents-blind-to-ui/",
-    "/blog/user-stories": "/blog/frontman-vs-cursor-vs-claude-code/",
-    "/blog/welcome": "/blog/introducing-frontman/",
-    "/blog/what-are-framework-aware-ai-coding-tools": "/blog/what-are-browser-aware-ai-coding-tools/",
-    "/blog/user-feedback": "/changelog/",
-  },
   vite: {
     plugins: [tailwindcss()],
     server: {
@@ -246,6 +238,8 @@ export default defineConfig({
       if (/(?<!\/docs)\/integrations\/(astro|nextjs|vite)\/?$/.test(item.url)) return undefined;
       // Exclude noindexed stub pages that exist only for sidebar navigation.
       if (/\/docs\/guides\/?$/.test(item.url)) return undefined;
+      // Exclude explicit noindex pages from sitemap output.
+      if (/\/(404|pricing)\/?$/.test(item.url)) return undefined;
 
       // Use the real pubDate for blog and release posts; fall back to
       // build date for everything else.
