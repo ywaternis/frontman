@@ -126,8 +126,8 @@ defmodule FrontmanServerWeb.TasksChannelTest do
 
       # Verify task was created with the client-provided ID
       assert {:ok, task} = FrontmanServer.Tasks.get_task(scope, client_session_id)
-      assert task.task_id == client_session_id
-      assert task.framework.id == :nextjs
+      assert task.id == client_session_id
+      assert task.framework == :nextjs
     end
 
     test "stores framework ID from clientInfo", %{socket: socket, scope: scope} do
@@ -173,9 +173,9 @@ defmodule FrontmanServerWeb.TasksChannelTest do
       })
 
       assert {:ok, task} = FrontmanServer.Tasks.get_task(scope, client_session_id)
-      assert task.task_id == client_session_id
-      assert task.framework.id == :nextjs
-      assert Repo.get!(TaskSchema, client_session_id).framework == "nextjs"
+      assert task.id == client_session_id
+      assert task.framework == :nextjs
+      assert Repo.get!(TaskSchema, client_session_id).framework == :nextjs
     end
 
     test "stores vite framework ID from clientInfo", %{socket: socket, scope: scope} do
@@ -209,8 +209,8 @@ defmodule FrontmanServerWeb.TasksChannelTest do
       assert_push("acp:message", %{"id" => 2, "result" => %{}})
 
       assert {:ok, task} = FrontmanServer.Tasks.get_task(scope, client_session_id)
-      assert task.framework.id == :vite
-      assert Repo.get!(TaskSchema, client_session_id).framework == "vite"
+      assert task.framework == :vite
+      assert Repo.get!(TaskSchema, client_session_id).framework == :vite
     end
 
     test "returns error when session/new called without sessionId", %{socket: socket} do
@@ -474,11 +474,11 @@ defmodule FrontmanServerWeb.TasksChannelTest do
     } do
       # Persist messages without starting execution — this test is about
       # session/load history streaming, not the agent loop.
-      FrontmanServer.Tasks.add_user_message(scope, task_id, [
+      user_message_fixture(scope, task_id, [
         %{"type" => "text", "text" => "Hello"}
       ])
 
-      FrontmanServer.Tasks.add_user_message(scope, task_id, [
+      user_message_fixture(scope, task_id, [
         %{"type" => "text", "text" => "World"}
       ])
 
@@ -520,10 +520,27 @@ defmodule FrontmanServerWeb.TasksChannelTest do
       scope: scope,
       task_id: task_id
     } do
-      FrontmanServer.Tasks.add_agent_response(scope, task_id, "Response 1", %{})
-      FrontmanServer.Tasks.add_agent_response(scope, task_id, "Response 2", %{})
+      user_message_fixture(scope, task_id, [
+        %{"type" => "text", "text" => "Prompt"}
+      ])
+
+      turn_number = latest_turn_number(task_id)
+
+      FrontmanServer.Tasks.agent_replied(scope, task_id, turn_number, "Response 1", %{})
+      FrontmanServer.Tasks.agent_replied(scope, task_id, turn_number, "Response 2", %{})
 
       push(socket, "acp:message", acp_request(1, "session/load", %{"sessionId" => task_id}))
+
+      assert_push("acp:message", %{
+        "method" => "session/update",
+        "params" => %{
+          "sessionId" => ^task_id,
+          "update" => %{
+            "sessionUpdate" => "user_message_chunk",
+            "content" => %{"text" => "Prompt"}
+          }
+        }
+      })
 
       # Per ACP spec: only agent_message_chunk exists (no start/end markers)
       # Client's LoadComplete handler finalizes any streaming messages
@@ -553,11 +570,13 @@ defmodule FrontmanServerWeb.TasksChannelTest do
     end
 
     test "streams mixed history in order", %{socket: socket, scope: scope, task_id: task_id} do
-      FrontmanServer.Tasks.add_user_message(scope, task_id, [
+      user_message_fixture(scope, task_id, [
         %{"type" => "text", "text" => "Question"}
       ])
 
-      FrontmanServer.Tasks.add_agent_response(scope, task_id, "Answer", %{})
+      turn_number = latest_turn_number(task_id)
+
+      FrontmanServer.Tasks.agent_replied(scope, task_id, turn_number, "Answer", %{})
 
       push(socket, "acp:message", acp_request(1, "session/load", %{"sessionId" => task_id}))
 

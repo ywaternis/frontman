@@ -47,13 +47,15 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
       # Create an LLM that returns a tool call on first turn, then completes
       expect_llm_responses([{:tool_calls, [mcp_tool_call], "Done!"}])
 
-      {:ok, _} =
+      {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
           task_id,
           user_content("Please call the MCP tool"),
-          MCP.to_swarm_tools([some_mcp_tool_def]),
-          mcp_tool_defs: [some_mcp_tool_def]
+          execution_request_fixture(
+            tools: MCP.to_swarm_tools([some_mcp_tool_def]),
+            mcp_tool_defs: [some_mcp_tool_def]
+          )
         )
 
       # Collect all tool call interactions broadcast via PubSub
@@ -64,7 +66,7 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
       # If this fails with count > 1, we have the duplicate bug
       assert length(tool_call_broadcasts) == 1,
              "Expected exactly 1 tool call broadcast, got #{length(tool_call_broadcasts)}. " <>
-               "This indicates Tasks.add_tool_call is being called multiple times."
+               "This indicates Tasks.request_client_tool is being called multiple times."
 
       {:ok, task} = Tasks.get_task(scope, task_id)
 
@@ -78,18 +80,19 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
     end
   end
 
-  # Collects all {:interaction, %ToolCall{}} broadcasts for a specific tool call ID
+  # Collects all {:interaction, %ToolCall{}, turn_number} broadcasts for a specific tool call ID
   defp collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms) do
     collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, [])
   end
 
   defp collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, acc) do
     receive do
-      {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_tool_call_id} = tc} ->
+      {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_tool_call_id} = tc,
+       _turn_number} ->
         # Found a matching tool call broadcast, keep collecting
         collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, [tc | acc])
 
-      {:interaction, _other} ->
+      {:interaction, _other, _turn_number} ->
         # Different interaction, ignore and keep collecting
         collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, acc)
     after
@@ -127,17 +130,20 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
 
       expect_llm_responses([{:tool_calls, [mcp_tool_call], "Done!"}])
 
-      {:ok, _} =
+      {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
           task_id,
           user_content("Call tool"),
-          MCP.to_swarm_tools([mcp_tool_def]),
-          mcp_tool_defs: [mcp_tool_def]
+          execution_request_fixture(
+            tools: MCP.to_swarm_tools([mcp_tool_def]),
+            mcp_tool_defs: [mcp_tool_def]
+          )
         )
 
       # Wait for the interaction broadcast
-      assert_receive {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_id}},
+      assert_receive {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_id},
+                      _turn_number},
                      5_000
 
       # At this point, agent should be registered for the tool call

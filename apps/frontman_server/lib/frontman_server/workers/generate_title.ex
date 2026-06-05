@@ -8,9 +8,7 @@ defmodule FrontmanServer.Workers.GenerateTitle do
   @moduledoc """
   Oban worker that generates a short task title from the first user prompt.
 
-  Resolves the API key through the standard priority chain (OAuth > user key >
-  server key), bypassing quota checks since title generation is a cheap
-  internal operation (~30 tokens).
+  Resolves the API key through the standard priority chain (OAuth > user key > env key > server key).
   """
 
   use Oban.Worker,
@@ -29,6 +27,7 @@ defmodule FrontmanServer.Workers.GenerateTitle do
   alias FrontmanServer.Providers
   alias FrontmanServer.Providers.ResolvedKey
   alias FrontmanServer.Tasks
+  alias FrontmanServer.Tasks.StreamCleanup
   alias FrontmanServer.Vault
   alias ReqLLM.Message.ContentPart
 
@@ -43,7 +42,7 @@ defmodule FrontmanServer.Workers.GenerateTitle do
           task_id: String.t(),
           user_prompt_text: String.t(),
           model: String.t() | nil,
-          encrypted_env_api_key: String.t()
+          encrypted_env_api_key: String.t() | nil
         }
 
   @doc """
@@ -75,12 +74,11 @@ defmodule FrontmanServer.Workers.GenerateTitle do
     scope = Accounts.scope_for_user_with_env_keys(user, env_api_keys)
     model = Map.get(args, "model")
 
-    with {:ok, resolved_key} <-
-           Providers.prepare_api_key(scope, model, skip_quota: true),
+    with {:ok, resolved_key} <- Providers.prepare_api_key(scope, model),
          {:ok, raw_title} <- call_llm(resolved_key, user_prompt_text),
          title = String.trim(raw_title),
          false <- title == "",
-         :ok <- Tasks.set_generated_title(scope, task_id, title) do
+         :ok <- Tasks.apply_title_suggestion(scope, task_id, title) do
       :ok
     else
       {:error, :no_api_key} ->
@@ -114,7 +112,7 @@ defmodule FrontmanServer.Workers.GenerateTitle do
           response.stream
           |> Stream.filter(fn chunk -> chunk.type == :content end)
           |> Stream.map(fn chunk -> chunk.text || "" end)
-          |> Tasks.wrap_stream(response.cancel)
+          |> StreamCleanup.wrap_stream(response.cancel)
           |> Enum.join("")
 
         {:ok, title}

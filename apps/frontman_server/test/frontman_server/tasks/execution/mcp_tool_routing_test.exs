@@ -1,16 +1,5 @@
 defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
-  @moduledoc """
-  Tests MCP tool routing through TaskChannel.
-
-  ## Architecture
-
-  `start_mcp_tool/3` is called by PE in its own process to:
-  1. Register PE's pid in ToolCallRegistry (so {:tool_result, ...} routes back to PE)
-  2. Publish the ToolCall interaction (for TaskChannel routing to the client)
-
-  This ensures MCP tools route to the browser client and deliver results back
-  to the waiting executor.
-  """
+  @moduledoc false
 
   use FrontmanServer.ExecutionCase
   use FrontmanServerWeb.ChannelCase
@@ -18,10 +7,11 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
   import FrontmanServer.InteractionCase.Helpers
   import FrontmanServer.Test.Fixtures.Tasks
 
+  alias FrontmanServer.Accounts.Scope
   alias FrontmanServer.Tasks
-  alias FrontmanServer.Tasks.Execution.RootAgent
   alias FrontmanServer.Tasks.Execution.ToolExecutor
   alias FrontmanServer.Tasks.Interaction
+  alias FrontmanServer.Tools.MCP
   alias FrontmanServerWeb.UserSocket
   alias JsonRpc
 
@@ -39,7 +29,7 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
       assert_push("mcp:message", %{"method" => "initialize"})
 
       # Subscribe to PubSub to see what interactions are published
-      Phoenix.PubSub.subscribe(FrontmanServer.PubSub, Tasks.topic(task_id))
+      Phoenix.PubSub.subscribe(FrontmanServer.PubSub, task_topic(task_id))
 
       {:ok, socket: socket, task_id: task_id, scope: scope}
     end
@@ -48,13 +38,13 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
       task_id: task_id,
       scope: scope
     } do
+      {:ok, _message} = user_message_fixture(scope, task_id, user_content("test turn"))
+      turn_number = latest_turn_number(task_id)
+
       tool_call = swarm_tool_call("take_screenshot", ~s({"selector": "#main"}))
 
-      # start_mcp_tool registers self() in the registry and publishes the interaction.
-      # Here, the test process acts as PE.
-      ToolExecutor.start_mcp_tool(scope, task_id, tool_call)
+      ToolExecutor.start_mcp_tool(scope, task_id, turn_number, tool_call)
 
-      # MCP request SHOULD be pushed to channel automatically
       assert_push(
         "mcp:message",
         %{
@@ -64,8 +54,9 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
         2_000
       )
 
-      # Verify interaction was published via PubSub
-      assert_receive {:interaction, %Interaction.ToolCall{tool_name: "take_screenshot"}}, 500
+      assert_receive {:interaction, %Interaction.ToolCall{tool_name: "take_screenshot"},
+                      _turn_number},
+                     500
     end
 
     test "full agent execution with MCP tool routing", %{
@@ -73,10 +64,9 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
       task_id: task_id,
       scope: scope
     } do
-      # Integration test using full Swarm execution with a provider response that returns an MCP tool call
       mcp_tool_call = swarm_tool_call("take_screenshot", ~s({"selector": "#content"}))
 
-      mcp_tool_def = %FrontmanServer.Tools.MCP{
+      mcp_tool_def = %MCP{
         name: "take_screenshot",
         description: "Take a screenshot",
         input_schema: %{},
@@ -86,34 +76,21 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
 
       expect_llm_responses([{:tool_calls, [mcp_tool_call], ""}, "Component implemented!"])
 
-      llm_opts = [api_key: "test-key", model: "openrouter:anthropic/claude-sonnet-4-20250514"]
+      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "test-key"})
 
-      raw_executor =
-        ToolExecutor.make_executor(scope, task_id,
-          backend_tool_modules: [],
-          mcp_tool_defs: [mcp_tool_def]
-        )
-
-      # Wrap executor with PE so run_streaming receives plain ToolResults.
-      {:ok, task_sup} = Task.Supervisor.start_link()
-
-      executor = fn tool_calls ->
-        executions = raw_executor.(tool_calls)
-
-        case SwarmAi.ParallelExecutor.run(executions, task_sup) do
-          {:ok, results} -> results
-          {:halt, _} = halt -> halt
-        end
-      end
-
-      executor_task =
-        Task.async(fn ->
-          agent = RootAgent.new(llm_opts: llm_opts)
-
-          SwarmAi.run_streaming(agent, [SwarmAi.Message.user("Implement the component")],
-            tool_executor: executor
+      {:ok, _interaction, _turn_number} =
+        Tasks.submit_user_message(
+          scope,
+          task_id,
+          user_content("Implement the component"),
+          execution_request_fixture(
+            tools: MCP.to_swarm_tools([mcp_tool_def]),
+            backend_tool_modules: [],
+            mcp_tool_defs: [mcp_tool_def],
+            model: "openrouter:anthropic/claude-sonnet-4-20250514",
+            project_traits: []
           )
-        end)
+        )
 
       # Verify MCP request is pushed to channel
       assert_push(
@@ -135,9 +112,8 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
 
       push(socket, "mcp:message", JsonRpc.success_response(mcp_request_id, mcp_response))
 
-      # Agent should complete
-      result = Task.await(executor_task, 10_000)
-      assert {:ok, "Component implemented!", _loop_id} = result
+      assert_receive {:interaction, %Tasks.Interaction.AgentCompleted{}, _turn_number},
+                     10_000
     end
   end
 end

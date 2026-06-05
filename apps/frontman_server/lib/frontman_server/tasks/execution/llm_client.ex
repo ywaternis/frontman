@@ -17,11 +17,10 @@ defmodule FrontmanServer.Tasks.Execution.LLMClient do
 
   use TypedStruct
 
-  alias FrontmanServer.Providers
   alias SwarmAi.SchemaTransformer
 
   typedstruct do
-    field(:model, String.t(), default: Providers.default_model())
+    field(:model, String.t() | map(), enforce: true)
     field(:tools, [SwarmAi.Tool.t()], default: [])
     # llm_opts must include :api_key (resolved at domain layer)
     field(:llm_opts, keyword(), default: [])
@@ -32,7 +31,7 @@ defmodule FrontmanServer.Tasks.Execution.LLMClient do
 
   ## Options
 
-  - `:model` - Model spec string (default: "openrouter:google/gemini-3-flash-preview")
+  - `:model` - Required ReqLLM model spec from `Providers.to_llm_args/2`
   - `:tools` - List of SwarmAi.Tool structs
   - `:llm_opts` - Options for ReqLLM, must include `:api_key`
   """
@@ -161,7 +160,7 @@ defimpl SwarmAi.LLM, for: FrontmanServer.Tasks.Execution.LLMClient do
 
   # Legacy compatibility path for ReqLLM builds that emit :error chunks.
   # Current ReqLLM versions raise ReqLLM.Error.API.Stream instead; those are
-  # classified in ExecutionEvent.classify_error/1.
+  # classified in ErrorClassifier.classify_error/1.
   defp normalize_reqllm_chunk(%{type: :error, text: text, metadata: %{error: original}})
        when is_binary(text) do
     classify_llm_error(original, text)

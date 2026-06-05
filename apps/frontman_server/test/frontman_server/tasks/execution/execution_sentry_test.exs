@@ -1,21 +1,20 @@
 defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
   @moduledoc """
-  Integration tests verifying Sentry error reporting for agent execution failures.
+  Tests SwarmDispatcher Sentry reporting for agent execution failures.
 
   Tests Gap 3 from issue #474:
   - Failed event triggers Sentry report at :error level
-  - Crashed event triggers Sentry report with exception/stacktrace when available
+  - Stream-consumption errors are reported as failed executions, not crashes
   """
 
-  use FrontmanServer.ExecutionCase
+  use ExUnit.Case, async: false
 
   import FrontmanServer.Test.Fixtures.Accounts
   import FrontmanServer.Test.Fixtures.Tasks
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias FrontmanServer.Accounts.Scope
-  alias FrontmanServer.Tasks
-  alias FrontmanServer.Tasks.ExecutionEvent
+  alias FrontmanServer.Tasks.Interaction
+  alias FrontmanServer.Tasks.SwarmDispatcher
 
   setup do
     Sentry.Test.setup_sentry(dedup_events: false)
@@ -24,7 +23,8 @@ defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
     on_exit(fn -> Sandbox.stop_owner(pid) end)
 
     scope = user_scope_fixture()
-    task_id = task_with_pubsub_fixture(scope, framework: "nextjs")
+    task_id = task_with_active_run_fixture(scope, framework: "nextjs")
+    Phoenix.PubSub.subscribe(FrontmanServer.PubSub, task_topic(task_id))
 
     {:ok, task_id: task_id, scope: scope}
   end
@@ -35,15 +35,19 @@ defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
       task_id: task_id,
       scope: scope
     } do
-      expect_llm_responses([{:error, :llm_api_failure}])
+      loop_id = "loop_test_failed"
 
-      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "sk-or-test"})
+      SwarmDispatcher.dispatch(
+        task_id,
+        {:failed, %{reason: :llm_api_failure, loop_id: loop_id}},
+        %{
+          scope: scope,
+          turn_number: latest_turn_number(task_id)
+        }
+      )
 
-      {:ok, _} =
-        Tasks.submit_user_message(scope, task_id, user_content("Hello"), [])
-
-      # Wait for the failed event broadcast (Sentry call completes before broadcast)
-      assert_receive {:execution_event, %ExecutionEvent{type: :failed}}, 5_000
+      assert_receive {:interaction, %Interaction.AgentError{kind: "failed"}, _turn_number},
+                     5_000
 
       reports = Sentry.Test.pop_sentry_reports()
 
@@ -54,10 +58,9 @@ defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
              "Expected at least one agent_execution_error Sentry report for task #{task_id}, got none. All reports: #{inspect(Enum.map(reports, & &1.tags))}"
 
       [report | _] = error_reports
-      metadata = report.extra[:logger_metadata]
       assert report.message.formatted == "Agent execution failed"
-      assert is_binary(metadata[:reason])
-      assert loop_id?(metadata[:loop_id])
+      assert report.extra[:reason] == ":llm_api_failure"
+      assert report.extra[:loop_id] == loop_id
     end
   end
 
@@ -67,19 +70,15 @@ defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
       task_id: task_id,
       scope: scope
     } do
-      # The provider returns {:ok, stream} where the stream raises when consumed.
-      # The try/rescue in execute_llm_call catches the raise and routes it through
-      # Loop.handle_error → {:failed, ...} → marked Logger report (not crash).
-      expect_llm_responses([{:stream_raise, "Sentry test: simulated stream error"}])
+      loop_id = "loop_test_stream_error"
+      reason = %RuntimeError{message: "Sentry test: simulated stream error"}
 
-      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "sk-or-test"})
+      SwarmDispatcher.dispatch(task_id, {:failed, %{reason: reason, loop_id: loop_id}}, %{
+        scope: scope,
+        turn_number: latest_turn_number(task_id)
+      })
 
-      {:ok, _} =
-        Tasks.submit_user_message(scope, task_id, user_content("Trigger error"), [])
-
-      # Stream errors now produce {:failed, ...} instead of {:crashed, ...}
-      assert_receive {:execution_event,
-                      %ExecutionEvent{type: :failed, payload: {:error, _reason, _loop_id}}},
+      assert_receive {:interaction, %Interaction.AgentError{kind: "failed"}, _turn_number},
                      5_000
 
       reports = Sentry.Test.pop_sentry_reports()
@@ -88,24 +87,19 @@ defmodule FrontmanServer.Tasks.Execution.ExecutionSentryTest do
         Enum.filter(reports, &agent_execution_error_for_task?(&1, task_id))
 
       assert error_reports != [],
-             "Expected at least one agent_execution_error Sentry report for task #{task_id}, got none. All reports: #{inspect(Enum.map(reports, &{&1.tags, &1.extra[:logger_metadata][:task_id]}))}"
+             "Expected at least one agent_execution_error Sentry report for task #{task_id}, got none. All reports: #{inspect(Enum.map(reports, &{&1.tags, &1.extra[:task_id]}))}"
 
       [report | _] = error_reports
-
-      # Error report should include the simulated error message
-      assert report.message != nil,
-             "Error report should have a message"
+      assert report.message.formatted == "Agent execution failed"
+      assert report.extra[:reason] == "Sentry test: simulated stream error"
+      assert report.extra[:loop_id] == loop_id
     end
   end
 
   defp agent_execution_error_for_task?(event, task_id) do
     case event.tags[:error_type] do
-      "agent_execution_error" -> event.extra[:logger_metadata][:task_id] == task_id
+      "agent_execution_error" -> event.extra[:task_id] == task_id
       _other -> false
     end
   end
-
-  defp loop_id?(loop_id) when is_integer(loop_id), do: true
-  defp loop_id?(loop_id) when is_binary(loop_id), do: true
-  defp loop_id?(_loop_id), do: false
 end

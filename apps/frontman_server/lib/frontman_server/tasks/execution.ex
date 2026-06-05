@@ -9,64 +9,66 @@ defmodule FrontmanServer.Tasks.Execution do
   Orchestrates agent execution for tasks.
 
   This module handles the mechanics of running an LLM agent loop:
-  - Building agent configuration from task data
-  - Submitting runs to SwarmAi.Runtime
+  - Building root agents from task data
+  - Submitting agents to SwarmAi
   - Translating agent events to persistence calls and PubSub broadcasts
   - Routing tool result notifications to waiting executors
 
   ## Telemetry
 
-  All agent telemetry is emitted by Swarm. This module passes `task_id` via
-  metadata, which flows through all Swarm telemetry events.
+  All agent telemetry is emitted by Swarm and correlated by agent id.
   """
 
   alias FrontmanServer.Accounts
   alias FrontmanServer.Accounts.Scope
-  alias FrontmanServer.Frameworks
   alias FrontmanServer.Observability.TelemetryEvents
   alias FrontmanServer.Providers
-  alias FrontmanServer.Tasks.Execution.{RootAgent, ToolExecutor}
-  alias FrontmanServer.Tasks.{Interaction, Task}
-  alias FrontmanServer.Tools
+  alias FrontmanServer.Tasks.Execution.{Prompts, RootAgent}
+  alias FrontmanServer.Tasks.{Interaction, InteractionSchema, TaskSchema}
+  alias SwarmAi.Message.ContentPart
 
-  @doc """
-  Cancels a running execution for the given task.
-
-  Returns `:ok` if the execution was cancelled, `{:error, :not_running}` if none is running.
-  """
-  @spec cancel(Accounts.scope(), String.t()) :: :ok | {:error, :not_running}
-  def cancel(%Scope{}, task_id) do
-    SwarmAi.Runtime.cancel(FrontmanServer.AgentRuntime, task_id)
-  end
-
-  @doc """
-  Returns true if an execution is currently running for the given task.
-  """
-  @spec running?(Accounts.scope(), String.t()) :: boolean()
-  def running?(%Scope{}, task_id) do
-    SwarmAi.Runtime.running?(FrontmanServer.AgentRuntime, task_id)
-  end
+  @type run_params :: %{
+          required(:tools) => [SwarmAi.Tool.t()],
+          required(:model) => FrontmanServer.Providers.Model.t() | map() | String.t() | nil,
+          required(:turn_number) => pos_integer(),
+          required(:interaction_rows) => [InteractionSchema.t()],
+          required(:project_traits) => [FrontmanServer.Frameworks.project_trait()],
+          required(:backend_tool_modules) => [module()],
+          required(:mcp_tool_defs) => [FrontmanServer.Tools.MCP.t()]
+        }
 
   @doc """
   Runs an agent execution for a task.
 
-  Resolves the API key, builds the agent configuration from the task,
-  and submits the run to SwarmAi.Runtime.
+  Resolves the API key, builds the root agent from the task,
+  and submits the agent to SwarmAi.
 
-  ## Options
-  - `:tools` - List of tool definitions for LLM (default: [])
-  - `:model` - LLM model spec (defaults to provider default)
+  ## Params
+  - `:tools` - LLM-visible tool schemas
+  - `:model` - LLM model spec (nil uses provider default)
+  - `:turn_number` - turn being executed
+  - `:interaction_rows` - persisted rows used to build prompt history
+  - `:project_traits` - client/framework traits used for system prompt guidance
+  - `:backend_tool_modules` - backend tool modules available for execution
+  - `:mcp_tool_defs` - client MCP tool definitions with timeout/policy metadata
+
   ## Returns
   - `{:ok, pid}` - Execution started successfully
   - `{:ok, :already_running}` - An execution is already running for this task
   - `{:error, :no_api_key}` - No API key available
-  - `{:error, :usage_limit_exceeded}` - Server key quota exhausted
   """
-  @spec run(Accounts.scope(), Task.t(), keyword()) ::
-          {:ok, pid() | :already_running} | {:error, :no_api_key | :usage_limit_exceeded | term()}
-  def run(%Scope{} = scope, %Task{} = task, opts \\ []) do
-    tools = Keyword.get(opts, :tools, [])
-    model = opts |> Keyword.get(:model) |> Providers.resolve_model_string()
+  @spec run(Accounts.scope(), TaskSchema.t(), run_params()) ::
+          {:ok, pid() | :already_running} | {:error, :no_api_key | term()}
+  def run(%Scope{} = scope, %TaskSchema{} = task, %{
+        tools: tools,
+        model: requested_model,
+        turn_number: turn_number,
+        interaction_rows: interaction_rows,
+        project_traits: project_traits,
+        backend_tool_modules: backend_tool_modules,
+        mcp_tool_defs: mcp_tool_defs
+      }) do
+    model = requested_model |> Providers.resolve_model_string()
 
     # Resolve API key at the domain layer (earliest point)
     case Providers.prepare_api_key(scope, model) do
@@ -76,49 +78,35 @@ defmodule FrontmanServer.Tasks.Execution do
 
         llm_opts =
           llm_opts
-          |> maybe_enable_prompt_cache(api_key_info.provider)
+          |> put_anthropic_prompt_cache(api_key_info.provider)
 
-        task_id = task.task_id
-        agent = build_agent(task, tools, model_spec, llm_opts, task.framework, opts)
+        agent = %RootAgent{
+          task: task,
+          scope: scope,
+          turn_number: turn_number,
+          messages: prompt_messages(interaction_rows, turn_number),
+          tools: tools,
+          backend_tool_modules: backend_tool_modules,
+          mcp_tool_defs: mcp_tool_defs,
+          system_prompt: system_prompt(task, project_traits),
+          model: model_spec,
+          llm_opts: llm_opts
+        }
 
-        messages =
-          task.interactions
-          |> Interaction.to_swarm_messages()
-
-        mcp_tool_defs = Keyword.get(opts, :mcp_tool_defs, [])
-
-        backend_tool_modules =
-          Keyword.get(opts, :backend_tool_modules, Tools.backend_tool_modules())
-
-        tool_executor =
-          ToolExecutor.make_executor(scope, task_id,
-            backend_tool_modules: backend_tool_modules,
-            mcp_tool_defs: mcp_tool_defs
-          )
-
-        # Emit task start telemetry BEFORE Runtime.run to avoid race with task_stop
+        # Emit task start telemetry BEFORE SwarmAi.run to avoid race with task_stop
         # in event handlers — the agent may complete before this line returns.
-        TelemetryEvents.task_start(task_id)
+        TelemetryEvents.task_start(task.id)
 
-        case SwarmAi.Runtime.run(FrontmanServer.AgentRuntime, task_id, agent, messages,
-               metadata: %{
-                 task_id: task_id,
-                 resolved_key: api_key_info,
-                 scope: scope,
-                 interaction_id: Keyword.get(opts, :interaction_id)
-               },
-               tool_executor: tool_executor,
-               tool_execution_mode: Frameworks.tool_execution_mode(task.framework)
-             ) do
+        case SwarmAi.run(FrontmanServer.AgentRuntime, agent) do
           {:ok, pid} ->
             {:ok, pid}
 
           {:error, :already_running} ->
-            TelemetryEvents.task_stop(task_id)
+            TelemetryEvents.task_stop(task.id)
             {:ok, :already_running}
 
           error ->
-            TelemetryEvents.task_stop(task_id)
+            TelemetryEvents.task_stop(task.id)
             error
         end
 
@@ -131,13 +119,12 @@ defmodule FrontmanServer.Tasks.Execution do
   Notifies that a tool result has arrived.
 
   Routes the result to the blocking executor via Registry metadata.
-  Called by the Tasks facade after persisting the tool result interaction.
   Returns `:notified` when the result was delivered to a live executor,
   `:no_executor` when no executor was waiting (e.g., server restarted).
   """
-  @spec notify_tool_result(Accounts.scope(), String.t(), term(), boolean()) ::
+  @spec notify_tool_result(String.t(), term(), boolean()) ::
           :notified | :no_executor
-  def notify_tool_result(%Scope{}, tool_call_id, result, is_error) do
+  def notify_tool_result(tool_call_id, result, is_error) do
     case Elixir.Registry.lookup(FrontmanServer.ToolCallRegistry, {:tool_call, tool_call_id}) do
       [{_pid, %{caller_pid: caller}}] ->
         encoded = encode_result_for_swarm(result)
@@ -150,45 +137,66 @@ defmodule FrontmanServer.Tasks.Execution do
   end
 
   # --- Private ---
+  defp prompt_messages(rows, turn_number)
+       when is_list(rows) and is_integer(turn_number) and turn_number > 0 do
+    Enum.flat_map(rows, fn
+      %InteractionSchema{turn_number: row_turn} = row when row_turn < turn_number ->
+        row
+        |> row_to_messages()
+        |> Enum.map(&decay_images/1)
 
-  defp maybe_enable_prompt_cache(opts, "anthropic"),
-    do: Keyword.put(opts, :anthropic_prompt_cache, true)
+      %InteractionSchema{turn_number: row_turn} = row when row_turn == turn_number ->
+        row_to_messages(row)
+    end)
+  end
 
-  defp maybe_enable_prompt_cache(opts, _provider), do: opts
+  defp row_to_messages(row) do
+    row
+    |> InteractionSchema.to_struct()
+    |> List.wrap()
+    |> Interaction.to_swarm_messages()
+  end
 
-  defp build_agent(%Task{} = task, tools, model_spec, llm_opts, %Frameworks{} = fw, opts) do
-    # Derive prompt data from task interactions
-    project_rules =
-      task.interactions
-      |> Enum.filter(&match?(%Interaction.DiscoveredProjectRule{}, &1))
+  defp decay_images(%{content: content} = msg) when is_list(content) do
+    %{msg | content: Enum.map(content, &decay_image_part/1)}
+  end
 
-    project_structure =
-      task.interactions
-      |> Enum.find(&match?(%Interaction.DiscoveredProjectStructure{}, &1))
-      |> case do
-        nil -> nil
-        struct -> struct.summary
-      end
+  defp decay_images(msg), do: msg
 
-    RootAgent.new(
-      tools: tools,
-      has_annotations: Interaction.has_annotations?(task.interactions),
-      project_traits: Keyword.get(opts, :project_traits, []),
-      framework: fw,
-      model: model_spec,
-      llm_opts: llm_opts,
-      project_rules: project_rules,
-      project_structure: project_structure
+  defp decay_image_part(%ContentPart{type: type}) when type in [:image, :image_url],
+    do: ContentPart.text("[image: previously analyzed]")
+
+  defp decay_image_part(part), do: part
+
+  defp system_prompt(%TaskSchema{} = task, project_traits) do
+    interactions = task.interactions
+
+    Prompts.build(
+      has_annotations:
+        Enum.any?(interactions, &match?(%Interaction.UserMessage{annotations: [_ | _]}, &1)),
+      project_traits: project_traits,
+      framework: task.framework,
+      project_rules: Enum.filter(interactions, &match?(%Interaction.DiscoveredProjectRule{}, &1)),
+      project_structure: project_structure(interactions)
     )
   end
+
+  defp project_structure(interactions) do
+    case Enum.find(interactions, &match?(%Interaction.DiscoveredProjectStructure{}, &1)) do
+      nil -> nil
+      struct -> struct.summary
+    end
+  end
+
+  defp put_anthropic_prompt_cache(opts, "anthropic"),
+    do: Keyword.put(opts, :anthropic_prompt_cache, true)
+
+  defp put_anthropic_prompt_cache(opts, _provider), do: opts
 
   defp encode_result_for_swarm(value) when is_binary(value), do: value
   defp encode_result_for_swarm(value), do: Jason.encode!(value)
 
   @doc false
-  def error_message(%Scope{}, :usage_limit_exceeded),
-    do: "Free requests exhausted. Add your API key in Settings to continue."
-
   def error_message(%Scope{}, :no_api_key),
     do: "No API key available for this request."
 

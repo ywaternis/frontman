@@ -16,18 +16,27 @@ defmodule FrontmanServer.Tasks.TaskSchema do
   import Ecto.Query
 
   alias FrontmanServer.Accounts.User
+  alias FrontmanServer.Frameworks
   alias FrontmanServer.Tasks.InteractionSchema
 
+  @framework_values Frameworks.ids()
   @primary_key {:id, :binary_id, autogenerate: false}
   @foreign_key_type :binary_id
   schema "tasks" do
     field(:short_desc, :string)
-    field(:framework, :string)
+    field(:framework, Ecto.Enum, values: @framework_values)
+    field(:interactions, :any, virtual: true, default: [])
 
     belongs_to(:user, User)
-    has_many(:interactions, InteractionSchema, foreign_key: :task_id)
+    has_many(:interaction_rows, InteractionSchema, foreign_key: :task_id)
 
     timestamps(type: :utc_datetime)
+  end
+
+  @doc "Returns the default short description for a new task."
+  @spec default_title() :: String.t()
+  def default_title do
+    "New Task"
   end
 
   @doc """
@@ -66,9 +75,16 @@ defmodule FrontmanServer.Tasks.TaskSchema do
     from(t in query, where: t.user_id == ^user_id)
   end
 
-  @spec with_interactions(Ecto.Queryable.t()) :: Ecto.Query.t()
-  def with_interactions(query \\ __MODULE__) do
-    from(t in query, preload: [:interactions])
+  @spec by_id_for_user(String.t(), String.t()) :: Ecto.Query.t()
+  def by_id_for_user(id, user_id) do
+    __MODULE__
+    |> by_id(id)
+    |> for_user(user_id)
+  end
+
+  @spec locked_for_update(Ecto.Queryable.t()) :: Ecto.Query.t()
+  def locked_for_update(query \\ __MODULE__) do
+    from(t in query, lock: "FOR UPDATE")
   end
 
   @spec ordered_by_updated(Ecto.Queryable.t()) :: Ecto.Query.t()
