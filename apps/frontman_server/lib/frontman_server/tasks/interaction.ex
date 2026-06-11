@@ -264,6 +264,7 @@ defmodule FrontmanServer.Tasks.Interaction do
     defstruct annotation_id: nil,
               annotation_index: nil,
               tag_name: nil,
+              selector: nil,
               comment: nil,
               file: nil,
               line: nil,
@@ -294,6 +295,7 @@ defmodule FrontmanServer.Tasks.Interaction do
       nearby_text
       parent
       screenshot
+      selector
       tag_name
     )
 
@@ -308,6 +310,7 @@ defmodule FrontmanServer.Tasks.Interaction do
         annotation_id: data["annotation_id"],
         annotation_index: data["annotation_index"],
         tag_name: data["tag_name"] || "unknown",
+        selector: data["selector"],
         comment: data["comment"],
         file: data["file"],
         line: data["line"],
@@ -788,6 +791,7 @@ defmodule FrontmanServer.Tasks.Interaction do
       annotation_id: ann.annotation_id,
       annotation_index: ann.annotation_index,
       tag_name: ann.tag_name,
+      selector: ann.selector,
       comment: ann.comment,
       file: ann.file,
       line: ann.line,
@@ -1001,6 +1005,7 @@ defmodule FrontmanServer.Tasks.Interaction do
     [
       annotation_string_field(ann.component_name, "Component"),
       annotation_string_field(ann.comment, "Comment"),
+      annotation_string_field(ann.selector, "CSS Selector"),
       annotation_string_field(ann.css_classes, "CSS Classes"),
       annotation_string_field(ann.nearby_text, "Nearby Text"),
       annotation_bbox_field(ann.bounding_box),
