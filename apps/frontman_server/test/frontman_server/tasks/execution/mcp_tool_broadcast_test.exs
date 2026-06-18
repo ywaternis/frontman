@@ -50,11 +50,12 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
       {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
-          task_id,
-          user_content("Please call the MCP tool"),
-          execution_request_fixture(
-            tools: MCP.to_swarm_tools([some_mcp_tool_def]),
-            mcp_tool_defs: [some_mcp_tool_def]
+          Map.merge(
+            execution_request_fixture(mcp_tools: [some_mcp_tool_def]),
+            %{
+              task_id: task_id,
+              message: user_content("Please call the MCP tool")
+            }
           )
         )
 
@@ -77,6 +78,12 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
       assert persisted_call["name"] == "some_mcp_tool"
       assert Jason.decode!(persisted_call["arguments"]) == %{"arg" => "value"}
       refute Map.has_key?(persisted_call, "function")
+
+      assert :ok = Tasks.cancel_execution(scope, task_id)
+
+      assert_receive {:interaction, %Tasks.Interaction.AgentError{kind: "cancelled"},
+                      _turn_number},
+                     5_000
     end
   end
 
@@ -133,11 +140,12 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
       {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
-          task_id,
-          user_content("Call tool"),
-          execution_request_fixture(
-            tools: MCP.to_swarm_tools([mcp_tool_def]),
-            mcp_tool_defs: [mcp_tool_def]
+          Map.merge(
+            execution_request_fixture(mcp_tools: [mcp_tool_def]),
+            %{
+              task_id: task_id,
+              message: user_content("Call tool")
+            }
           )
         )
 
@@ -155,6 +163,12 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
 
       assert registered,
              "Agent not registered when tool call broadcast - race condition exists"
+
+      assert :ok = Tasks.cancel_execution(scope, task_id)
+
+      assert_receive {:interaction, %Tasks.Interaction.AgentError{kind: "cancelled"},
+                      _turn_number},
+                     5_000
     end
   end
 end

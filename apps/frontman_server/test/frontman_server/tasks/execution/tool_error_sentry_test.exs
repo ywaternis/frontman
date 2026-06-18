@@ -200,8 +200,8 @@ defmodule FrontmanServer.Tasks.Execution.ToolErrorSentryTest do
 
   # MCP tool timeouts are now handled by SwarmAi.ParallelExecutor via per-tool
   # deadlines (timeout_ms/on_timeout fields on ToolExecution.Await). When on_timeout is
-  # :pause_agent, the Runtime dispatches {:paused, {:timeout, ...}} which
-  # SwarmDispatcher persists as an AgentPaused interaction — not a Sentry error.
+  # :pause_agent, the Runtime dispatches {:paused, {:timeout, ...}} which Tasks
+  # persists as an AgentPaused interaction — not a Sentry error.
 
   describe "handle_timeout/5 — :error policy Sentry reporting" do
     @tag :capture_log
@@ -223,7 +223,7 @@ defmodule FrontmanServer.Tasks.Execution.ToolErrorSentryTest do
 
       assert tool_result != nil
       assert tool_result.is_error == true
-      assert tool_result.result =~ "timed out"
+      assert ModelContextProtocol.extract_content_text(tool_result.result) =~ "timed out"
 
       reports = Sentry.Test.pop_sentry_reports()
       timeout_reports = Enum.filter(reports, &(&1.tags[:error_type] == "tool_timeout"))

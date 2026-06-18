@@ -15,10 +15,18 @@ defmodule FrontmanServer.Tasks.Execution do
   """
 
   alias FrontmanServer.Accounts.Scope
+  alias FrontmanServer.Frameworks
   alias FrontmanServer.Providers
-  alias FrontmanServer.Tasks.Execution.{Prompts, RootAgent}
-  alias FrontmanServer.Tasks.{Interaction, InteractionSchema, TaskSchema}
+  alias FrontmanServer.Repo
+  alias FrontmanServer.Tasks
+  alias FrontmanServer.Tasks.Execution.{LLMClient, Prompts, ToolExecutor}
+  alias FrontmanServer.Tasks.Interaction
+  alias FrontmanServer.Tasks.InteractionSchema
+  alias FrontmanServer.Tasks.TaskSchema
+  alias FrontmanServer.Tools
+  alias SwarmAi.{Loop, Message}
   alias SwarmAi.Message.ContentPart
+  alias SwarmAi.Message.Tool
 
   @doc """
   Runs an agent execution for a task.
@@ -27,59 +35,81 @@ defmodule FrontmanServer.Tasks.Execution do
   and submits the agent to SwarmAi.
 
   ## Params
-  - `:tools` - LLM-visible tool schemas
   - `:model` - LLM model spec (nil uses provider default)
-  - `:turn_number` - turn being executed
-  - `:interaction_rows` - persisted rows used to build prompt history
+  - `:mcp_tools` - client MCP tool definitions for this turn
   - `:project_traits` - client/framework traits used for system prompt guidance
-  - `:backend_tool_modules` - backend tool modules available for execution
-  - `:mcp_tool_defs` - client MCP tool definitions with timeout/policy metadata
 
   ## Returns
   - `{:ok, pid}` - Execution started successfully
-  - `{:ok, :already_running}` - An execution is already running for this task
+  - `{:error, {:start_failed, reason}}` - Execution worker failed to start
   - `{:error, :no_api_key}` - No API key available
   """
-  def run(%Scope{} = scope, %TaskSchema{} = task, %{
-        tools: tools,
-        model: requested_model,
-        turn_number: turn_number,
-        interaction_rows: interaction_rows,
-        project_traits: project_traits,
-        backend_tool_modules: backend_tool_modules,
-        mcp_tool_defs: mcp_tool_defs
-      }) do
+  def run(
+        %Scope{} = scope,
+        %TaskSchema{} = task,
+        turn_number,
+        %{
+          model: requested_model,
+          mcp_tools: mcp_tools,
+          project_traits: project_traits
+        }
+      )
+      when is_integer(turn_number) and turn_number > 0 and is_list(mcp_tools) and
+             is_list(project_traits) do
     max_tokens = Application.fetch_env!(:frontman_server, :llm_max_tokens)
 
     case Providers.prepare_llm_args(scope, requested_model, max_tokens: max_tokens) do
       {:ok, {model_spec, llm_opts}} ->
-        agent = %RootAgent{
-          task: task,
-          scope: scope,
-          turn_number: turn_number,
-          messages: prompt_messages(interaction_rows, turn_number),
-          tools: tools,
-          backend_tool_modules: backend_tool_modules,
-          mcp_tool_defs: mcp_tool_defs,
-          system_prompt: system_prompt(task, project_traits),
-          model: model_spec,
-          llm_opts: llm_opts
-        }
+        interaction_rows = interaction_rows(task.id, turn_number)
+        backend_tool_modules = Tools.backend_tool_modules()
+        tools = Tools.prepare_for_task(mcp_tools)
 
-        case SwarmAi.run(FrontmanServer.AgentRuntime, agent) do
-          {:ok, pid} ->
-            {:ok, pid}
+        messages = [
+          Message.system(system_prompt(task, project_traits))
+          | prompt_messages(interaction_rows, turn_number)
+        ]
 
-          {:error, :already_running} ->
-            {:ok, :already_running}
+        llm = LLMClient.new(tools: tools, llm_opts: llm_opts, model: model_spec)
+        execution_mode = Frameworks.tool_execution_mode(task.framework)
 
-          error ->
-            error
+        execute_tools = fn tool_calls, task_supervisor ->
+          ToolExecutor.execute(scope, %{
+            task_id: task.id,
+            turn_number: turn_number,
+            tool_calls: tool_calls,
+            task_supervisor: task_supervisor,
+            backend_tool_modules: backend_tool_modules,
+            mcp_tool_defs: mcp_tools,
+            execution_mode: execution_mode
+          })
         end
+
+        dispatch_event = fn event ->
+          Tasks.handle_swarm_event(scope, task.id, turn_number, event)
+        end
+
+        loop =
+          Loop.new(%{
+            task_id: task.id,
+            turn_number: turn_number,
+            messages: messages,
+            llm: llm,
+            execute_tools: execute_tools,
+            dispatch_event: dispatch_event
+          })
+
+        SwarmAi.run(FrontmanServer.AgentRuntime, loop)
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp interaction_rows(task_id, turn_number) do
+    InteractionSchema.for_task(task_id)
+    |> InteractionSchema.up_to_turn(turn_number)
+    |> InteractionSchema.ordered()
+    |> Repo.all()
   end
 
   @doc """
@@ -89,11 +119,29 @@ defmodule FrontmanServer.Tasks.Execution do
   Returns `:notified` when the result was delivered to a live executor,
   `:no_executor` when no executor was waiting (e.g., server restarted).
   """
-  def notify_tool_result(tool_call_id, result, is_error) do
+  def notify_tool_result(%Interaction.ToolResult{
+        tool_call_id: tool_call_id,
+        result: %{"content" => [_ | _] = content},
+        is_error: is_error
+      }) do
+    if Enum.all?(content, &is_map/1) do
+      notify_tool_result(tool_call_id, content, is_error)
+    else
+      :no_executor
+    end
+  end
+
+  def notify_tool_result(%Interaction.ToolResult{}), do: :no_executor
+
+  defp notify_tool_result(tool_call_id, content, is_error) do
     case Elixir.Registry.lookup(FrontmanServer.ToolCallRegistry, {:tool_call, tool_call_id}) do
       [{_pid, %{caller_pid: caller}}] ->
-        encoded = encode_result_for_swarm(result)
-        send(caller, {:tool_result, tool_call_id, encoded, is_error})
+        content_parts =
+          content
+          |> Enum.map(&to_swarm_content_part/1)
+
+        send(caller, {:tool_result, tool_call_id, content_parts, is_error})
+
         :notified
 
       [] ->
@@ -119,24 +167,31 @@ defmodule FrontmanServer.Tasks.Execution do
     row
     |> InteractionSchema.to_struct()
     |> List.wrap()
+    # FIXME(Danni) - why not get rid of swarm messages? lets it just work with reqllm messages
     |> Interaction.to_swarm_messages()
   end
 
-  defp decay_images(%{content: content} = msg) when is_list(content) do
-    %{msg | content: Enum.map(content, &decay_image_part/1)}
+  defp decay_images(%Tool{content: content, tool_call_id: tool_call_id} = msg)
+       when is_list(content) do
+    %{msg | content: Enum.map(content, &decay_image_part(&1, tool_call_id))}
   end
 
   defp decay_images(msg), do: msg
 
-  defp decay_image_part(%ContentPart{type: type}) when type in [:image, :image_url],
-    do: ContentPart.text("[image: previously analyzed]")
+  defp decay_image_part(%ContentPart{type: type}, tool_call_id)
+       when type in [:image, :image_url] do
+    ContentPart.text("[image: omitted, tool_call_id: #{tool_call_id}]")
+  end
 
-  defp decay_image_part(part), do: part
+  defp decay_image_part(part, _tool_call_id), do: part
 
   defp system_prompt(%TaskSchema{} = task, project_traits) do
+    # QUESTION(Danni) - this is weird, in the caller-apps/frontman_server/lib/frontman_server/tasks/execution.ex:L47
+    # we pass interaction_rows, but here we get task.interactions, weird
     interactions = task.interactions
 
     Prompts.build(
+      # FIXME(Danni) - has_annotations will be true even if the last message doesnt have annotations
       has_annotations:
         Enum.any?(interactions, &match?(%Interaction.UserMessage{annotations: [_ | _]}, &1)),
       project_traits: project_traits,
@@ -153,8 +208,10 @@ defmodule FrontmanServer.Tasks.Execution do
     end
   end
 
-  defp encode_result_for_swarm(value) when is_binary(value), do: value
-  defp encode_result_for_swarm(value), do: Jason.encode!(value)
+  defp to_swarm_content_part(%{"type" => "text", "text" => text}), do: ContentPart.text(text)
+
+  defp to_swarm_content_part(%{"type" => "image", "data" => data, "mimeType" => mime_type}),
+    do: ContentPart.image(Base.decode64!(data), mime_type)
 
   @doc false
   def error_message(%Scope{}, :no_api_key),

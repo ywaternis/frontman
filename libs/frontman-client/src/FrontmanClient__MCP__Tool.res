@@ -1,4 +1,9 @@
 // Re-export from protocol package
-type toolResult<'a> = FrontmanAiFrontmanProtocol.FrontmanProtocol__Tool.toolResult<'a>
-module type Tool = FrontmanAiFrontmanProtocol.FrontmanProtocol__Tool.BrowserTool
-module ToolNames = FrontmanAiFrontmanProtocol.FrontmanProtocol__Tool.ToolNames
+module ProtocolTool = FrontmanAiFrontmanProtocol.FrontmanProtocol__Tool
+module MCP = FrontmanAiFrontmanProtocol.FrontmanProtocol__MCP
+
+module type Tool = ProtocolTool.BrowserTool
+module ToolNames = ProtocolTool.ToolNames
+
+let jsonResult = ProtocolTool.jsonResult
+let imageResult = ProtocolTool.imageResult

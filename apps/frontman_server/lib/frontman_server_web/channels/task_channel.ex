@@ -16,7 +16,6 @@ defmodule FrontmanServerWeb.TaskChannel do
   require Logger
 
   alias AgentClientProtocol, as: ACP
-  alias FrontmanServer.Accounts.Scope
   alias FrontmanServer.Frameworks
   alias FrontmanServer.Providers
   alias FrontmanServer.Tasks
@@ -77,7 +76,7 @@ defmodule FrontmanServerWeb.TaskChannel do
   def handle_in(@acp_message, payload, socket) do
     parsed = JsonRpc.parse(payload)
 
-    Logger.info("got ACP message #{inspect(parsed)}")
+    Logger.info(fn -> "Got ACP message #{inspect(parsed)}" end)
 
     case parsed do
       {:ok, {:request, id, @acp_method_session_prompt, params}} ->
@@ -112,8 +111,6 @@ defmodule FrontmanServerWeb.TaskChannel do
 
   @impl true
   def handle_in("mcp:message", payload, socket) do
-    Logger.debug("Received mcp:message payload: #{inspect(payload)}")
-
     case JsonRpc.parse_response(payload) do
       {:ok, {:success, id, result}} ->
         handle_mcp_response(id, result, socket)
@@ -174,7 +171,11 @@ defmodule FrontmanServerWeb.TaskChannel do
           socket.assigns.scope,
           task_id,
           retried_error_id,
-          retry_execution_request(socket)
+          %{
+            model: nil,
+            mcp_tools: socket.assigns.mcp_tools,
+            project_traits: Frameworks.project_traits_from_meta(nil, socket.assigns.framework)
+          }
         )
 
       _stale_or_nil ->
@@ -300,10 +301,7 @@ defmodule FrontmanServerWeb.TaskChannel do
   defp handle_mcp_response(id, result, socket) do
     init_state = socket.assigns[:mcp_init_state]
 
-    Logger.debug("MCP response received: id=#{inspect(id)}")
-
     if mcp_initialization_request?(init_state, id) do
-      Logger.debug("MCP response #{inspect(id)} matched MCPInitializer")
       {new_state, actions} = MCPInitializer.handle_response(init_state, id, result)
       socket = assign(socket, :mcp_init_state, new_state)
       socket = execute_init_actions(actions, socket)
@@ -318,7 +316,6 @@ defmodule FrontmanServerWeb.TaskChannel do
       {:ok, tool_call_id, socket} ->
         case open_tool_call(socket, tool_call_id) do
           {:ok, tool_call} ->
-            Logger.debug("MCP response #{inspect(id)} matched tool call #{tool_call_id}")
             handle_tool_call_response(tool_call, result, socket)
 
           :error ->
@@ -337,7 +334,6 @@ defmodule FrontmanServerWeb.TaskChannel do
   defp handle_tool_call_response_by_id(id, result, socket) when is_binary(id) do
     case open_tool_call(socket, id) do
       {:ok, tool_call} ->
-        Logger.debug("MCP response #{inspect(id)} matched tool call")
         handle_tool_call_response(tool_call, result, socket)
 
       :error ->
@@ -380,17 +376,15 @@ defmodule FrontmanServerWeb.TaskChannel do
   defp handle_tool_call_response(tool_call, result, socket) do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
-    text_result = MCP.extract_content_text(result)
-    parsed_result = MCP.parse_tool_result(text_result)
     is_error = MCP.error?(result)
     meta = result["_meta"] || %{}
 
     status =
       if is_error, do: ACP.tool_call_status_failed(), else: ACP.tool_call_status_completed()
 
-    Logger.info("Tool #{tool_call.tool_name} #{status}: #{text_result}")
+    Logger.info("Tool #{tool_call.tool_name} #{status}")
 
-    content = ACP.Content.from_tool_result(text_result)
+    content = ACP.Content.from_tool_result(result)
     notification = ACP.tool_call_update(task_id, tool_call.tool_call_id, status, content)
     push(socket, @acp_message, notification)
 
@@ -399,7 +393,7 @@ defmodule FrontmanServerWeb.TaskChannel do
              scope,
              task_id,
              %{id: tool_call.tool_call_id, name: tool_call.tool_name},
-             parsed_result,
+             result,
              is_error
            ) do
         {:ok, _interaction, :notified} ->
@@ -407,8 +401,8 @@ defmodule FrontmanServerWeb.TaskChannel do
 
         {:ok, _interaction, :no_executor} ->
           # No live executor (agent dead after server restart). If all active-run
-          # tool calls have results, resume the agent using scope.env_api_keys +
-          # model from the tool result's _meta (sent by the client per MCP spec).
+          # tool calls have results, resume the agent using model from the tool
+          # result's _meta (sent by the client per MCP spec).
           case Tasks.get_active_run_unresolved_tool_calls(scope, task_id) do
             {:ok, _turn_number, []} ->
               Logger.info(
@@ -446,22 +440,23 @@ defmodule FrontmanServerWeb.TaskChannel do
   end
 
   defp resume_agent(socket, scope, task_id, meta) do
-    scope = enrich_scope_with_env_keys(scope, meta)
-
     model =
       case Providers.model_from_client_params(meta["model"]) do
         {:ok, m} -> m
         :error -> nil
       end
 
-    Tasks.resume_execution(scope, task_id, execution_request(socket, task_id, model, meta))
+    Tasks.resume_execution(scope, task_id, %{
+      model: model,
+      mcp_tools: socket.assigns.mcp_tools,
+      project_traits: Frameworks.project_traits_from_meta(meta, socket.assigns.framework)
+    })
+
     socket
   end
 
   defp handle_mcp_error(id, error, socket) do
     init_state = socket.assigns[:mcp_init_state]
-
-    Logger.debug("MCP error received: id=#{inspect(id)}")
 
     if mcp_initialization_request?(init_state, id) do
       {new_state, actions} = MCPInitializer.handle_error(init_state, id, error)
@@ -557,7 +552,7 @@ defmodule FrontmanServerWeb.TaskChannel do
            scope,
            task_id,
            %{id: tool_call.tool_call_id, name: tool_call.tool_name},
-           error_message,
+           ModelContextProtocol.tool_result_error(error_message),
            true
          ) do
       {:ok, _interaction, _executor_status} ->
@@ -625,7 +620,7 @@ defmodule FrontmanServerWeb.TaskChannel do
 
   # This is called after the client has joined the session channel, allowing
   # history notifications to be received through the onUpdate callback.
-  defp handle_session_load(id, params, socket) do
+  defp handle_session_load(id, _params, socket) do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
     Logger.info("ACP session/load request received on session channel for: #{task_id}")
@@ -635,9 +630,8 @@ defmodule FrontmanServerWeb.TaskChannel do
         stream_session_history(socket, task)
 
         # Return ACP-compliant LoadSessionResponse with config options.
-        # Enrich scope with env keys from _meta if present in params.
         config_options =
-          enrich_scope_from_params(scope, params)
+          scope
           |> Providers.model_config_data()
           |> ACP.build_model_config_options()
 
@@ -676,19 +670,24 @@ defmodule FrontmanServerWeb.TaskChannel do
     end)
   end
 
-  defp process_prompt(id, %{"prompt" => prompt_content} = params, socket) do
+  defp process_prompt(id, %{"prompt" => content_blocks, "_meta" => meta}, socket)
+       when is_map(meta) do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
-    scope = enrich_scope_from_params(scope, params)
-    socket = assign(socket, :scope, scope)
+    {:ok, model} = Providers.model_from_client_params(meta["model"])
 
-    model = extract_model_from_params(params)
+    execution = %{
+      model: model,
+      mcp_tools: socket.assigns.mcp_tools,
+      project_traits: Frameworks.project_traits_from_meta(meta, socket.assigns.framework)
+    }
 
     Logger.info("process_prompt", %{task_id: task_id, model: model})
 
-    execution = execution_request(socket, task_id, model, prompt_meta(params))
-
-    case Tasks.submit_user_message(scope, task_id, prompt_content, execution) do
+    case Tasks.submit_user_message(
+           scope,
+           Map.merge(execution, %{task_id: task_id, message: content_blocks})
+         ) do
       {:error, :already_running} ->
         Logger.info("Rejected prompt — agent already running for task #{task_id}")
         error_response = JsonRpc.error_response(id, -32_000, "Agent already running")
@@ -700,8 +699,7 @@ defmodule FrontmanServerWeb.TaskChannel do
             turn_number: turn_number,
             jsonrpc_id: id
           })
-
-        socket = assign(socket, :last_execution, execution)
+          |> assign(:last_execution, execution)
 
         Logger.info("User message added, agent spawned for task #{task_id}")
 
@@ -711,50 +709,6 @@ defmodule FrontmanServerWeb.TaskChannel do
         Logger.error("Failed to add user message: #{inspect(reason)}")
         error_response = JsonRpc.error_response(id, -32_000, to_string(reason))
         {:reply, {:ok, %{@acp_message => error_response}}, socket}
-    end
-  end
-
-  defp enrich_scope_from_params(scope, %{"_meta" => meta}) when is_map(meta) do
-    enrich_scope_with_env_keys(scope, meta)
-  end
-
-  defp enrich_scope_from_params(scope, _), do: scope
-
-  defp enrich_scope_with_env_keys(scope, metadata) when is_map(metadata) do
-    case Providers.extract_env_keys(metadata) do
-      env_api_keys when map_size(env_api_keys) > 0 -> Scope.with_env_api_keys(scope, env_api_keys)
-      _env_api_keys -> scope
-    end
-  end
-
-  defp enrich_scope_with_env_keys(scope, _metadata), do: scope
-
-  defp execution_request(socket, task_id, model, meta) do
-    mcp_tools = socket.assigns[:mcp_tools] || []
-
-    %{
-      tools: Tools.prepare_for_task(mcp_tools, task_id),
-      model: model,
-      mcp_tool_defs: mcp_tools,
-      backend_tool_modules: Tools.backend_tool_modules(),
-      project_traits: Frameworks.project_traits_from_meta(meta, socket.assigns.framework)
-    }
-  end
-
-  defp retry_execution_request(socket) do
-    case socket.assigns[:last_execution] do
-      %{tools: _tools} = execution -> execution
-      _none -> execution_request(socket, socket.assigns.task_id, nil, nil)
-    end
-  end
-
-  defp prompt_meta(%{"_meta" => meta}) when is_map(meta), do: meta
-  defp prompt_meta(_params), do: nil
-
-  defp extract_model_from_params(params) when is_map(params) do
-    case Providers.model_from_client_params(get_in(params, ["_meta", "model"])) do
-      {:ok, model} -> model
-      :error -> nil
     end
   end
 
@@ -827,7 +781,11 @@ defmodule FrontmanServerWeb.TaskChannel do
       socket.assigns.scope,
       task_id,
       retried_error_id,
-      retry_execution_request(socket)
+      %{
+        model: nil,
+        mcp_tools: socket.assigns.mcp_tools,
+        project_traits: Frameworks.project_traits_from_meta(nil, socket.assigns.framework)
+      }
     )
 
     {:noreply, socket}

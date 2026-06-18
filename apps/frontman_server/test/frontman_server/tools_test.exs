@@ -5,10 +5,13 @@ defmodule FrontmanServer.ToolsTest do
   import FrontmanServer.Test.Fixtures.Tasks
 
   alias FrontmanServer.Tasks
+  alias FrontmanServer.Tasks.Interaction.ToolResult
   alias FrontmanServer.Tools
   alias FrontmanServer.Tools.Backend.Context
   alias FrontmanServer.Tools.GetToolResult
   alias FrontmanServer.Tools.TodoWrite
+  alias FrontmanServer.Tools.WebFetch
+  alias ModelContextProtocol, as: MCP
 
   setup do
     scope = user_scope_fixture()
@@ -31,28 +34,20 @@ defmodule FrontmanServer.ToolsTest do
   end
 
   describe "find_tool/1" do
-    test "finds existing tool" do
-      assert {:ok, module} = Tools.find_tool("todo_write")
-      assert module == TodoWrite
-
-      assert {:ok, module} = Tools.find_tool("get_tool_result")
-      assert module == GetToolResult
+    test "finds registered tools" do
+      for {tool_name, module} <- [
+            {"todo_write", TodoWrite},
+            {"get_tool_result", GetToolResult},
+            {"web_fetch", WebFetch}
+          ] do
+        assert Tools.find_tool(tool_name) == {:ok, module}
+      end
     end
 
-    test "finds web_fetch tool" do
-      assert {:ok, module} = Tools.find_tool("web_fetch")
-      assert module == FrontmanServer.Tools.WebFetch
-    end
-
-    test "returns :not_found for non-existent tool" do
-      assert :not_found = Tools.find_tool("nonexistent")
-    end
-
-    test "returns :not_found for old todo tools" do
-      assert :not_found = Tools.find_tool("todo_add")
-      assert :not_found = Tools.find_tool("todo_update")
-      assert :not_found = Tools.find_tool("todo_remove")
-      assert :not_found = Tools.find_tool("todo_list")
+    test "returns :not_found for unavailable tools" do
+      for tool_name <- ~w(nonexistent todo_add todo_update todo_remove todo_list) do
+        assert Tools.find_tool(tool_name) == :not_found
+      end
     end
   end
 
@@ -112,7 +107,10 @@ defmodule FrontmanServer.ToolsTest do
         ]
       }
 
-      assert {:ok, %{"todos" => todos}} = TodoWrite.execute(args, context)
+      result = TodoWrite.execute(args, context)
+      refute MCP.error?(result)
+      assert %{"todos" => todos} = result["structuredContent"]
+      assert Jason.decode!(MCP.extract_content_text(result)) == result["structuredContent"]
       assert length(todos) == 2
 
       [first, second] = todos
@@ -129,7 +127,9 @@ defmodule FrontmanServer.ToolsTest do
 
     test "accepts empty todos array", %{task: task} do
       context = build_context(task)
-      assert {:ok, %{"todos" => []}} = TodoWrite.execute(%{"todos" => []}, context)
+
+      assert %{"structuredContent" => %{"todos" => []}} =
+               TodoWrite.execute(%{"todos" => []}, context)
     end
 
     test "rejects invalid status", %{task: task} do
@@ -145,7 +145,9 @@ defmodule FrontmanServer.ToolsTest do
         ]
       }
 
-      assert {:error, msg} = TodoWrite.execute(args, context)
+      result = TodoWrite.execute(args, context)
+      assert MCP.error?(result)
+      msg = MCP.extract_content_text(result)
       assert msg =~ "index 0"
     end
 
@@ -163,7 +165,9 @@ defmodule FrontmanServer.ToolsTest do
         ]
       }
 
-      assert {:error, msg} = TodoWrite.execute(args, context)
+      result = TodoWrite.execute(args, context)
+      assert MCP.error?(result)
+      msg = MCP.extract_content_text(result)
       assert msg =~ "index 0"
     end
 
@@ -176,7 +180,7 @@ defmodule FrontmanServer.ToolsTest do
         ]
       }
 
-      assert {:error, _} = TodoWrite.execute(args, context)
+      assert TodoWrite.execute(args, context) |> MCP.error?()
     end
   end
 
@@ -186,12 +190,14 @@ defmodule FrontmanServer.ToolsTest do
       scope: scope,
       turn_number: turn_number
     } do
+      stored_result = MCP.tool_result_text("file contents")
+
       {:ok, interaction, :no_executor} =
         Tasks.resolve_tool_request(
           scope,
           task_id,
           %{id: "tc-read", name: "read_file"},
-          %{"content" => "file contents"},
+          stored_result,
           false,
           turn_number: turn_number
         )
@@ -199,17 +205,60 @@ defmodule FrontmanServer.ToolsTest do
       {:ok, task} = Tasks.get_task(scope, task_id)
       context = build_context(task)
 
-      assert {:ok, result} = GetToolResult.execute(%{"tool_call_id" => "tc-read"}, context)
+      result = GetToolResult.execute(%{"tool_call_id" => "tc-read"}, context)
 
-      assert result == %{"content" => "file contents"}
+      assert result == stored_result
       assert interaction.tool_call_id == "tc-read"
     end
 
     test "returns an error when the interaction does not exist", %{task: task} do
       context = build_context(task)
 
-      assert {:error, "Tool result not found: missing"} =
-               GetToolResult.execute(%{"tool_call_id" => "missing"}, context)
+      result = GetToolResult.execute(%{"tool_call_id" => "missing"}, context)
+      assert MCP.error?(result)
+      assert MCP.extract_content_text(result) == "Tool result not found: missing"
+    end
+
+    test "returns an error when the stored result is malformed", %{task: task} do
+      malformed_result =
+        %ToolResult{
+          id: Ecto.UUID.generate(),
+          tool_call_id: "tc-malformed",
+          tool_name: "read_file",
+          result: %{"content" => "tool result text"},
+          is_error: false,
+          timestamp: DateTime.utc_now()
+        }
+
+      context = build_context(%{task | interactions: [malformed_result | task.interactions]})
+
+      result = GetToolResult.execute(%{"tool_call_id" => "tc-malformed"}, context)
+
+      assert MCP.error?(result)
+
+      assert MCP.extract_content_text(result) ==
+               "Stored tool result for tc-malformed is not a valid MCP tool result"
+    end
+
+    test "returns an error when content is invalid type", %{task: task} do
+      malformed_result =
+        %ToolResult{
+          id: Ecto.UUID.generate(),
+          tool_call_id: "tc-invalid-content",
+          tool_name: "read_file",
+          result: %{"content" => [%{"type" => "text", "text" => "ok"}, "bad"], "isError" => false},
+          is_error: false,
+          timestamp: DateTime.utc_now()
+        }
+
+      context = build_context(%{task | interactions: [malformed_result | task.interactions]})
+
+      result = GetToolResult.execute(%{"tool_call_id" => "tc-invalid-content"}, context)
+
+      assert MCP.error?(result)
+
+      assert MCP.extract_content_text(result) ==
+               "Stored tool result is invalid: content must be list of objects"
     end
   end
 end

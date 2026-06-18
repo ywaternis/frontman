@@ -16,7 +16,7 @@ defmodule FrontmanServer.Tasks.Execution.ErrorPropagationTest do
   import FrontmanServer.Test.Fixtures.Tasks
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias FrontmanServer.Accounts.Scope
+  alias FrontmanServer.Providers
   alias FrontmanServer.Tasks
   alias FrontmanServer.Tasks.Interaction
 
@@ -45,14 +45,15 @@ defmodule FrontmanServer.Tasks.Execution.ErrorPropagationTest do
         {:stream_raise, "LLM API error: image exceeds the maximum allowed size"}
       ])
 
-      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "sk-or-test"})
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "openrouter", "sk-or-test")
 
       {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
-          task_id,
-          user_content("Take a screenshot"),
-          execution_request_fixture()
+          Map.merge(execution_request_fixture(), %{
+            task_id: task_id,
+            message: user_content("Take a screenshot")
+          })
         )
 
       # Stream errors are now caught and surfaced as graceful failures.
@@ -68,14 +69,15 @@ defmodule FrontmanServer.Tasks.Execution.ErrorPropagationTest do
     } do
       expect_llm_responses([{:error, :llm_api_failure}])
 
-      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "sk-or-test"})
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "openrouter", "sk-or-test")
 
       {:ok, _, _} =
         Tasks.submit_user_message(
           scope,
-          task_id,
-          user_content("Hello"),
-          execution_request_fixture()
+          Map.merge(execution_request_fixture(), %{
+            task_id: task_id,
+            message: user_content("Hello")
+          })
         )
 
       # Should receive a failed interaction broadcast.

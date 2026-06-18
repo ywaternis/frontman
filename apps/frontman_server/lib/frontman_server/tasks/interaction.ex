@@ -195,6 +195,8 @@ defmodule FrontmanServer.Tasks.Interaction do
               filename: nil,
               uri: nil
 
+    def from_map(%__MODULE__{} = image), do: image
+
     def from_map(data) when is_map(data) do
       %__MODULE__{
         blob: data["blob"],
@@ -767,6 +769,24 @@ defmodule FrontmanServer.Tasks.Interaction do
     end
   end
 
+  def to_data_map(value), do: normalize_data(value)
+
+  defp normalize_data(%DateTime{} = timestamp), do: DateTime.to_iso8601(timestamp)
+
+  defp normalize_data(value) when is_struct(value),
+    do: value |> Map.from_struct() |> normalize_data()
+
+  defp normalize_data(value) when is_list(value), do: Enum.map(value, &normalize_data/1)
+
+  defp normalize_data(value) when is_map(value) do
+    Map.new(value, fn {key, value} -> {data_key(key), normalize_data(value)} end)
+  end
+
+  defp normalize_data(value), do: value
+
+  defp data_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp data_key(key), do: key
+
   def to_json_map(%UserMessage{} = value) do
     %{
       type: type_for(value),
@@ -856,8 +876,6 @@ defmodule FrontmanServer.Tasks.Interaction do
     Enum.flat_map(interactions, &to_swarm_message/1)
   end
 
-  # Explicit clause for every Interaction type. Adding a new type without a
-  # clause crashes immediately instead of silently omitting it from LLM history.
   defp to_swarm_message(%UserMessage{} = msg) do
     prompt_text = build_user_prompt_text(msg)
     content_parts = build_user_content_parts(prompt_text, msg)
@@ -878,15 +896,12 @@ defmodule FrontmanServer.Tasks.Interaction do
     ]
   end
 
-  defp to_swarm_message(%ToolResult{tool_name: name, tool_call_id: id, result: result}) do
-    json_result = if is_binary(result), do: result, else: Jason.encode!(result)
-
+  defp to_swarm_message(%ToolResult{result: %{"content" => [_ | _] = content}} = result) do
     [
       %SwarmMessage.Tool{
-        content: [SwarmContentPart.text(json_result)],
-        tool_call_id: id,
-        name: name,
-        metadata: %{}
+        content: Enum.map(content, &tool_result_content_part/1),
+        tool_call_id: result.tool_call_id,
+        name: result.tool_name
       }
     ]
   end
@@ -916,6 +931,12 @@ defmodule FrontmanServer.Tasks.Interaction do
 
   defp text_parts(""), do: []
   defp text_parts(text), do: [SwarmContentPart.text(text)]
+
+  defp tool_result_content_part(%{"type" => "text", "text" => text}),
+    do: SwarmContentPart.text(text)
+
+  defp tool_result_content_part(%{"type" => "image", "data" => data, "mimeType" => mime_type}),
+    do: SwarmContentPart.image(Base.decode64!(data), mime_type)
 
   defp append_annotation_screenshot_parts(parts, []), do: parts
 

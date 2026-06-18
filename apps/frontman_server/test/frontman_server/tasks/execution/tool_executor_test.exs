@@ -15,6 +15,7 @@ defmodule FrontmanServer.Tasks.Execution.ToolExecutorTest do
   alias FrontmanServer.Tasks.Interaction
   alias FrontmanServer.Tasks.TaskSchema
   alias FrontmanServer.Tools.Backend
+  alias SwarmAi.Message.ContentPart
 
   # --- Fake backend tools ---
 
@@ -28,7 +29,7 @@ defmodule FrontmanServer.Tasks.Execution.ToolExecutorTest do
     def timeout_ms, do: 30_000
     def on_timeout, do: :pause_agent
 
-    def execute(_args, _context), do: {:ok, "done"}
+    def execute(_args, _context), do: ModelContextProtocol.tool_result_text("done")
   end
 
   setup do
@@ -45,6 +46,7 @@ defmodule FrontmanServer.Tasks.Execution.ToolExecutorTest do
     scope = Scope.for_user(user)
     task_id = Ecto.UUID.generate()
     {:ok, %TaskSchema{id: ^task_id}} = Tasks.create_task(scope, task_id, "nextjs")
+    Phoenix.PubSub.subscribe(FrontmanServer.PubSub, task_topic(task_id))
 
     {:ok, _message} =
       user_message_fixture(scope, task_id, [%{"type" => "text", "text" => "test turn"}])
@@ -118,71 +120,37 @@ defmodule FrontmanServer.Tasks.Execution.ToolExecutorTest do
     end
   end
 
-  describe "run_backend_tool/4 — non-JSON-serializable result" do
-    defmodule BinaryResultTool do
-      @behaviour Backend
-
-      def name, do: "binary_result_tool"
-      def description, do: "Returns raw binary that breaks JSON encoding"
-      def parameter_schema, do: %{"type" => "object", "properties" => %{}}
-      def timeout_ms, do: 30_000
-      def on_timeout, do: :error
-
-      # Simulates a tool returning raw PNG bytes
-      def execute(_args, _context), do: {:ok, %{"content" => <<137, 80, 78, 71, 13, 10, 26, 10>>}}
-    end
-
-    @tag :capture_log
-    test "converts non-JSON-serializable result to error instead of crashing", %{
+  describe "execute/2" do
+    test "runs backend tools and returns ToolResult structs", %{
       scope: scope,
       task_id: task_id,
       turn_number: turn_number
     } do
-      tool_call = %SwarmAi.ToolCall{
-        id: "tc_#{System.unique_integer([:positive])}",
-        name: BinaryResultTool.name(),
-        arguments: "{}"
-      }
-
-      result =
-        ToolExecutor.run_backend_tool(scope, BinaryResultTool, task_id, turn_number, tool_call)
-
-      assert %SwarmAi.ToolResult{is_error: true} = result
-      assert [%SwarmAi.Message.ContentPart{type: :text, text: text}] = result.content
-      assert text =~ "JSON"
-    end
-  end
-
-  describe "make/3 — execution descriptors" do
-    test "executor build returns ToolExecution.Sync for backend tools", %{
-      scope: scope,
-      task_id: task_id,
-      turn_number: turn_number
-    } do
-      executor =
-        ToolExecutor.make(scope, task_id, turn_number, %{
-          backend_tool_modules: [PauseOnTimeoutTool],
-          mcp_tool_defs: [],
-          execution_mode: :parallel
-        })
-
       tc = %SwarmAi.ToolCall{
         id: "tc_#{System.unique_integer([:positive])}",
         name: PauseOnTimeoutTool.name(),
         arguments: "{}"
       }
 
-      [execution] = executor.build.([tc])
-      assert executor.execution_mode == :parallel
+      assert {:ok, [%SwarmAi.ToolResult{id: tool_call_id, is_error: false} = result]} =
+               ToolExecutor.execute(scope, %{
+                 task_id: task_id,
+                 turn_number: turn_number,
+                 tool_calls: [tc],
+                 task_supervisor: SwarmAi.task_supervisor_name(FrontmanServer.AgentRuntime),
+                 backend_tool_modules: [PauseOnTimeoutTool],
+                 mcp_tool_defs: [],
+                 execution_mode: :parallel
+               })
 
-      assert %SwarmAi.ToolExecution.Sync{
-               on_timeout_policy: :pause_agent,
-               on_timeout:
-                 {ToolExecutor, :handle_timeout, [^scope, ^task_id, ^turn_number, :pause_agent]}
-             } = execution
+      assert tool_call_id == tc.id
+      assert [%ContentPart{type: :text, text: "done"}] = result.content
+
+      {:ok, task} = Tasks.get_task(scope, task_id)
+      assert [%Interaction.ToolResult{is_error: false}] = tool_results(task, tc.id)
     end
 
-    test "executor build returns ToolExecution.Await for MCP tools", %{
+    test "runs MCP tools through await result routing", %{
       scope: scope,
       task_id: task_id,
       turn_number: turn_number
@@ -195,27 +163,44 @@ defmodule FrontmanServer.Tasks.Execution.ToolExecutorTest do
         timeout_ms: 60_000
       }
 
-      executor =
-        ToolExecutor.make(scope, task_id, turn_number, %{
-          backend_tool_modules: [],
-          mcp_tool_defs: [pause_mcp_def],
-          execution_mode: :serial
-        })
-
       tc = %SwarmAi.ToolCall{
         id: "tc_#{System.unique_integer([:positive])}",
         name: "some_mcp_tool",
         arguments: "{}"
       }
 
-      [execution] = executor.build.([tc])
-      assert executor.execution_mode == :serial
+      task =
+        Task.async(fn ->
+          ToolExecutor.execute(scope, %{
+            task_id: task_id,
+            turn_number: turn_number,
+            tool_calls: [tc],
+            task_supervisor: SwarmAi.task_supervisor_name(FrontmanServer.AgentRuntime),
+            backend_tool_modules: [],
+            mcp_tool_defs: [pause_mcp_def],
+            execution_mode: :serial
+          })
+        end)
 
-      assert %SwarmAi.ToolExecution.Await{
-               on_timeout_policy: :pause_agent,
-               on_timeout:
-                 {ToolExecutor, :handle_timeout, [^scope, ^task_id, ^turn_number, :pause_agent]}
-             } = execution
+      assert_receive {:interaction, %Interaction.ToolCall{tool_call_id: tool_call_id},
+                      _turn_number},
+                     500
+
+      assert tool_call_id == tc.id
+
+      [{_pid, %{caller_pid: caller}}] =
+        Registry.lookup(FrontmanServer.ToolCallRegistry, {:tool_call, tc.id})
+
+      send(
+        caller,
+        {:tool_result, tc.id, [ContentPart.text("mcp done")], false}
+      )
+
+      assert {:ok, [%SwarmAi.ToolResult{id: tool_call_id, is_error: false} = result]} =
+               Task.await(task, 1_000)
+
+      assert tool_call_id == tc.id
+      assert [%ContentPart{type: :text, text: "mcp done"}] = result.content
     end
   end
 end

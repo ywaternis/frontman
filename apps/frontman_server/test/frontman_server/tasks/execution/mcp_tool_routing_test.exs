@@ -7,7 +7,7 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
   import FrontmanServer.InteractionCase.Helpers
   import FrontmanServer.Test.Fixtures.Tasks
 
-  alias FrontmanServer.Accounts.Scope
+  alias FrontmanServer.Providers
   alias FrontmanServer.Tasks
   alias FrontmanServer.Tasks.Execution.ToolExecutor
   alias FrontmanServer.Tasks.Interaction
@@ -76,19 +76,21 @@ defmodule FrontmanServer.Tasks.Execution.McpToolRoutingTest do
 
       expect_llm_responses([{:tool_calls, [mcp_tool_call], ""}, "Component implemented!"])
 
-      scope = Scope.with_env_api_keys(scope, %{"openrouter" => "test-key"})
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "openrouter", "test-key")
 
       {:ok, _interaction, _turn_number} =
         Tasks.submit_user_message(
           scope,
-          task_id,
-          user_content("Implement the component"),
-          execution_request_fixture(
-            tools: MCP.to_swarm_tools([mcp_tool_def]),
-            backend_tool_modules: [],
-            mcp_tool_defs: [mcp_tool_def],
-            model: "openrouter:anthropic/claude-sonnet-4-20250514",
-            project_traits: []
+          Map.merge(
+            execution_request_fixture(
+              mcp_tools: [mcp_tool_def],
+              model: "openrouter:anthropic/claude-sonnet-4-20250514",
+              project_traits: []
+            ),
+            %{
+              task_id: task_id,
+              message: user_content("Implement the component")
+            }
           )
         )
 

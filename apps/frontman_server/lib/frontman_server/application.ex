@@ -45,22 +45,13 @@ defmodule FrontmanServer.Application do
       }
     })
 
-    :telemetry.attach(
-      "finch-logger",
-      [:finch, :request, :start],
-      &FrontmanServer.FinchLogger.handle_event/4,
-      nil
-    )
-
     children = [
       FrontmanServerWeb.Telemetry,
       FrontmanServer.Repo,
       FrontmanServer.Vault,
       {DNSCluster, query: Application.get_env(:frontman_server, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: FrontmanServer.PubSub},
-      {SwarmAi,
-       name: FrontmanServer.AgentRuntime,
-       event_dispatcher: {FrontmanServer.Tasks.SwarmDispatcher, :dispatch, []}},
+      {SwarmAi, name: FrontmanServer.AgentRuntime},
       # Registry for MCP tool call result routing (separate from agent execution tracking)
       {Registry, keys: :unique, name: FrontmanServer.ToolCallRegistry},
       # Oban background job processing (email delivery, contact sync, etc.)

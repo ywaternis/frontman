@@ -20,6 +20,7 @@ defmodule FrontmanServerWeb.ChannelCase do
   alias Ecto.Adapters.SQL.Sandbox
   alias FrontmanServer.Accounts
   alias FrontmanServer.Accounts.Scope
+  alias FrontmanServer.Providers
   alias FrontmanServer.Test.Fixtures.LLMProvider
 
   using do
@@ -170,21 +171,24 @@ defmodule FrontmanServerWeb.ChannelCase do
 
     * `:id` - JSON-RPC request id (default: `1`)
     * `:text` - prompt text (default: `"Hello"`)
-    * `:_meta` - _meta map (default: `%{}`)
+    * `:_meta` - _meta map with selected model
 
   ## Examples
 
       build_prompt_request()
       build_prompt_request(id: 42, text: "Next question")
-      build_prompt_request(_meta: %{"model" => %{"provider" => "anthropic"}})
+      build_prompt_request(_meta: %{"model" => %{"provider" => "openrouter", "value" => "google/gemini-3-flash-preview"}})
   """
   def build_prompt_request(opts \\ []) do
     id = Keyword.get(opts, :id, 1)
     text = Keyword.get(opts, :text, "Hello")
-    meta = Keyword.get(opts, :_meta, %{})
 
-    params = %{"prompt" => [%{"type" => "text", "text" => text}]}
-    params = if meta == %{}, do: params, else: Map.put(params, "_meta", meta)
+    meta =
+      Keyword.get(opts, :_meta, %{
+        "model" => %{"provider" => "openrouter", "value" => "google/gemini-3-flash-preview"}
+      })
+
+    params = %{"prompt" => [%{"type" => "text", "text" => text}], "_meta" => meta}
 
     build_acp_request("session/prompt", id, params)
   end
@@ -227,10 +231,8 @@ defmodule FrontmanServerWeb.ChannelCase do
         password: "testpassword123!"
       })
 
-    scope =
-      user
-      |> Scope.for_user()
-      |> Scope.with_env_api_keys(%{"openrouter" => "sk-or-test"})
+    scope = Scope.for_user(user)
+    {:ok, _api_key} = Providers.upsert_api_key(scope, "openrouter", "sk-or-test")
 
     {:ok, scope: scope, user: user}
   end

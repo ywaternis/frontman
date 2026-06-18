@@ -1,7 +1,9 @@
 import Config
 
 # Mark environment for runtime checks
-config :frontman_server, env: :dev
+config :frontman_server,
+  env: :dev,
+  llm_wire_tap_enabled: true
 
 # Configure your database
 # For DevPod: post-create.sh updates hostname to the Docker gateway IP
@@ -60,17 +62,14 @@ config :frontman_server, FrontmanServerWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :frontman_server, dev_routes: true
 
-# Include metadata and timestamps in development logs for verbose debugging
-config :logger, :default_formatter,
-  format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id, :task_id, :pid, :reason]
-
 # Set a higher stacktrace during development. Avoid configuring such
 # in production as building large stacktraces may be expensive.
 config :phoenix, :stacktrace_depth, 20
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
+
+config :logger, level: :info
 
 config :phoenix_live_view,
   # Include debug annotations and locations in rendered markup.
@@ -79,6 +78,10 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+config :req_llm,
+  telemetry: [payloads: :raw],
+  debug: true
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
