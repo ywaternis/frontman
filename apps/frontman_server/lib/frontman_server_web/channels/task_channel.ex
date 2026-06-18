@@ -60,7 +60,6 @@ defmodule FrontmanServerWeb.TaskChannel do
           |> assign(:mcp_tools, [])
           |> assign(:mcp_status, :pending)
           |> assign(:pending_mcp_tool_requests, %{})
-          |> assign(:last_execution, nil)
 
         send(self(), {:start_mcp_init, init_actions})
 
@@ -546,7 +545,7 @@ defmodule FrontmanServerWeb.TaskChannel do
     # Store error result and notify agent.
     # :no_executor means the agent is dead (e.g. server restart). Unlike the
     # success path in handle_tool_call_response/4, we don't auto-resume here because MCP
-    # error responses don't carry _meta (env API keys + model) needed to restart.
+    # error responses don't carry _meta with the model needed to restart.
     # The error is persisted; the user can retry via a new prompt.
     case Tasks.resolve_tool_request(
            scope,
@@ -674,40 +673,49 @@ defmodule FrontmanServerWeb.TaskChannel do
        when is_map(meta) do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
-    {:ok, model} = Providers.model_from_client_params(meta["model"])
 
-    execution = %{
-      model: model,
-      mcp_tools: socket.assigns.mcp_tools,
-      project_traits: Frameworks.project_traits_from_meta(meta, socket.assigns.framework)
-    }
+    case Providers.model_from_client_params(meta["model"]) do
+      {:ok, model} ->
+        Logger.info("process_prompt", %{task_id: task_id, model: model})
 
-    Logger.info("process_prompt", %{task_id: task_id, model: model})
+        case Tasks.submit_user_message(
+               scope,
+               %{
+                 task_id: task_id,
+                 message: content_blocks,
+                 model: model,
+                 mcp_tools: socket.assigns.mcp_tools,
+                 project_traits:
+                   Frameworks.project_traits_from_meta(meta, socket.assigns.framework)
+               }
+             ) do
+          {:error, :already_running} ->
+            Logger.info("Rejected prompt — agent already running for task #{task_id}")
+            error_response = JsonRpc.error_response(id, -32_000, "Agent already running")
+            {:reply, {:ok, %{@acp_message => error_response}}, socket}
 
-    case Tasks.submit_user_message(
-           scope,
-           Map.merge(execution, %{task_id: task_id, message: content_blocks})
-         ) do
-      {:error, :already_running} ->
-        Logger.info("Rejected prompt — agent already running for task #{task_id}")
-        error_response = JsonRpc.error_response(id, -32_000, "Agent already running")
-        {:reply, {:ok, %{@acp_message => error_response}}, socket}
+          {:ok, _interaction, turn_number} ->
+            socket =
+              socket
+              |> assign(:pending_prompt, %{
+                turn_number: turn_number,
+                jsonrpc_id: id
+              })
 
-      {:ok, _interaction, turn_number} ->
-        socket =
-          assign(socket, :pending_prompt, %{
-            turn_number: turn_number,
-            jsonrpc_id: id
-          })
-          |> assign(:last_execution, execution)
+            Logger.info("User message added, agent spawned for task #{task_id}")
 
-        Logger.info("User message added, agent spawned for task #{task_id}")
+            {:noreply, socket}
 
-        {:noreply, socket}
+          {:error, reason} ->
+            Logger.error("Failed to add user message: #{inspect(reason)}")
+            error_response = JsonRpc.error_response(id, -32_000, to_string(reason))
+            {:reply, {:ok, %{@acp_message => error_response}}, socket}
+        end
 
-      {:error, reason} ->
-        Logger.error("Failed to add user message: #{inspect(reason)}")
-        error_response = JsonRpc.error_response(id, -32_000, to_string(reason))
+      :error ->
+        error_response =
+          JsonRpc.error_response(id, JsonRpc.error_invalid_params(), "Model is required")
+
         {:reply, {:ok, %{@acp_message => error_response}}, socket}
     end
   end

@@ -1339,26 +1339,35 @@ let next = (state: state, action) => {
   // ACP session config option actions
   | ConfigOptionsReceived({configOptions}) =>
     open FrontmanAiFrontmanProtocol.FrontmanProtocol__ACP
-    let modelConfigOption = findConfigOptionByCategory(configOptions, Model)
+    let modelConfigOption =
+      findConfigOptionByCategory(configOptions, Model)->Option.getOrThrow(
+        ~message="ConfigOptionsReceived missing model config option",
+      )
 
-    // Extract the server's default currentValue from the model config option
-    let serverDefault = switch modelConfigOption {
-    | Some(SelectConfigOption({currentValue})) => Some(currentValue)
-    | None => None
+    let firstModelValue = switch modelConfigOption {
+    | SelectConfigOption({options: Grouped(groups)}) =>
+      groups
+      ->Array.get(0)
+      ->Option.flatMap(g => g.options->Array.get(0))
+      ->Option.map(opt => opt.value)
+      ->Option.getOrThrow(~message="Model config option has no models")
+    | SelectConfigOption({options: Ungrouped(_)}) =>
+      failwith("Model config option must use grouped options")
     }
 
     // When a provider was just connected, auto-select its first model.
-    // Otherwise keep the current selection (or fall back to server default).
+    // Otherwise keep the current selection or choose the first listed model.
     let (selectedModelValue, didAutoSelect) = switch state.pendingProviderAutoSelect {
     | Some(providerId) =>
       // Find the first model value from the newly connected provider's group
       let providerModelValue = switch modelConfigOption {
-      | Some(SelectConfigOption({options: Grouped(groups)})) =>
+      | SelectConfigOption({options: Grouped(groups)}) =>
         groups
         ->Array.find(g => g.group == providerId)
         ->Option.flatMap(g => g.options->Array.get(0))
         ->Option.map(opt => opt.value)
-      | _ => None
+      | SelectConfigOption({options: Ungrouped(_)}) =>
+        failwith("Model config option must use grouped options")
       }
       switch providerModelValue {
       | Some(value) => (Some(value), true)
@@ -1367,7 +1376,7 @@ let next = (state: state, action) => {
     | None =>
       switch state.selectedModelValue {
       | Some(value) => (Some(value), false)
-      | None => (serverDefault, serverDefault->Option.isSome)
+      | None => (Some(firstModelValue), true)
       }
     }
     // Persist whenever we picked a new model
