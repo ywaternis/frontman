@@ -11,7 +11,6 @@ module Log = FrontmanLogs.Logs.Make({
 module ACP = FrontmanAiFrontmanClient.FrontmanClient__ACP
 module Relay = FrontmanAiFrontmanClient.FrontmanClient__Relay
 module MCPServer = FrontmanAiFrontmanClient.FrontmanClient__MCP__Server
-module Channel = FrontmanAiFrontmanClient.FrontmanClient__Phoenix__Channel
 
 // Configuration for initialization
 type initConfig = {
@@ -116,7 +115,6 @@ type action =
     })
   | DeleteSession({taskId: string, onComplete: result<unit, string> => unit})
   | ClearSession
-  | Cleanup
 
 // Effects - side effects the reducer wants to trigger
 type effect =
@@ -128,9 +126,6 @@ type effect =
       initialAuthBehavior: Client__FtueState.authBehavior,
     })
   | ConnectRelay(Relay.t, WebAPI.EventAPI.abortSignal)
-  | DisconnectRelay(Relay.t)
-  | DisconnectACP(ACP.connection)
-  | AbortConnections(WebAPI.EventAPI.abortController)
   | CreateSessionEffect({
       connection: ACP.connection,
       mcpServer: MCPServer.t,
@@ -413,25 +408,6 @@ let reduce = (state: state, action: action): (state, array<effect>) => {
 
   | (_, CreateSession(_)) => (state, [LogError("Cannot create session: not ready")])
 
-  // === Cleanup ===
-  | (_, Cleanup) =>
-    let abortEffects = switch state.abortController {
-    | Some(controller) => [AbortConnections(controller)]
-    | None => []
-    }
-    let relayEffects = switch state.relayInstance {
-    | Some(relay) => [DisconnectRelay(relay)]
-    | None => []
-    }
-    let acpEffects = switch state.acp {
-    | ACPConnected(conn) => [DisconnectACP(conn)]
-    | ACPDisconnected | ACPConnecting | ACPAuthRequired(_) | ACPError(_) => []
-    }
-    (
-      {...initialState, initialAuthBehavior: state.initialAuthBehavior},
-      Array.flat([abortEffects, relayEffects, acpEffects]),
-    )
-
   // === Invalid transitions ===
   | (_, Initialize(_)) => (state, [LogInfo("Initialize ignored: already initialized")])
 
@@ -462,10 +438,7 @@ let next = reduce
 
 // Helper to clean up a session's channel handlers
 let cleanupSession = (session: ACP.session): unit => {
-  session.channel->Channel.off(~event=#"acp:message")
-  session.channel->Channel.off(~event=#"mcp:message")
-  session.channel->Channel.off(~event=#title_updated)
-  Channel.leave(session.channel)->ignore
+  ACP.cleanupSessionChannel(session)
   Log.debug(~ctx={"sessionId": session.sessionId}, "Cleaned up session channel")
 }
 
@@ -481,12 +454,7 @@ let handleEffect = (effect: effect, state: state, dispatch: action => unit) => {
   switch effect {
   | LogError(msg) => Log.error(msg)
   | LogInfo(msg) => Log.info(msg)
-  | DisconnectRelay(relay) => Relay.disconnect(relay)
-  | DisconnectACP(_) => ()
   | NotifyDeleteSessionRejected({onComplete, reason}) => onComplete(Error(reason))
-  | AbortConnections(controller) =>
-    Log.info("Aborting in-flight connections")
-    WebAPI.AbortController.abort(controller)
   | ConnectACP({config, signal, initialAuthBehavior}) =>
     let connect = async () => {
       let result = await ACP.connect(config, ~signal)

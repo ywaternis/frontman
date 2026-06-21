@@ -207,6 +207,12 @@ module Provider = {
       initialAuthBehavior: Client__FtueState.getAuthBehavior(),
     }
     let (state, dispatch) = StateReducer.useReducer(module(Reducer), initialConnectionState)
+    let connectionStateRef = React.useRef(state)
+
+    React.useEffect(() => {
+      connectionStateRef.current = state
+      None
+    }, [state])
 
     // Single initialization effect
     React.useEffect0(() => {
@@ -266,7 +272,19 @@ module Provider = {
           textDeltaBuffer.reset()
           _userMsgBuffer.pending = false
           _userMsgBuffer.blocks = []
-          dispatch(Cleanup)
+          let state = connectionStateRef.current
+          state.abortController->Option.forEach(controller =>
+            WebAPI.AbortController.abort(controller)
+          )
+          state.relayInstance->Option.forEach(relay => Relay.disconnect(relay))
+          let activeSession = switch state.session {
+          | SessionActive(session) => Some(session)
+          | NoSession | SessionCreating | SessionError(_) => None
+          }
+          switch state.acp {
+          | ACPConnected(conn) => ACP.disconnect(conn, ~session=?activeSession)
+          | ACPDisconnected | ACPConnecting | ACPAuthRequired(_) | ACPError(_) => ()
+          }
         },
       )
     })
