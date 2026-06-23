@@ -26,6 +26,7 @@ defmodule FrontmanServer.Providers.OpenAIOAuth do
   @client_id Application.compile_env!(:frontman_server, [__MODULE__, :client_id])
   @issuer Application.compile_env!(:frontman_server, [__MODULE__, :issuer])
   @token_url "#{@issuer}/oauth/token"
+  @req_options Application.compile_env(:frontman_server, [__MODULE__, :req_options], [])
 
   @doc """
   Step 1: Request a device code from OpenAI.
@@ -43,7 +44,10 @@ defmodule FrontmanServer.Providers.OpenAIOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post("#{@issuer}/api/accounts/deviceauth/usercode", body: body, headers: headers) do
+    case Req.post(
+           "#{@issuer}/api/accounts/deviceauth/usercode",
+           [body: body, headers: headers] ++ @req_options
+         ) do
       {:ok, %Req.Response{status: status, body: response_body}} when status in 200..299 ->
         device_auth_id = response_body["device_auth_id"]
         user_code = response_body["user_code"] || response_body["usercode"]
@@ -94,7 +98,10 @@ defmodule FrontmanServer.Providers.OpenAIOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post("#{@issuer}/api/accounts/deviceauth/token", body: body, headers: headers) do
+    case Req.post(
+           "#{@issuer}/api/accounts/deviceauth/token",
+           [body: body, headers: headers] ++ @req_options
+         ) do
       {:ok, %Req.Response{status: 200, body: response_body}} ->
         authorization_code = response_body["authorization_code"]
         code_verifier = response_body["code_verifier"]
@@ -150,7 +157,7 @@ defmodule FrontmanServer.Providers.OpenAIOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post(@token_url, body: body, headers: headers) do
+    case Req.post(@token_url, [body: body, headers: headers] ++ @req_options) do
       {:ok,
        %Req.Response{
          status: 200,
@@ -201,7 +208,7 @@ defmodule FrontmanServer.Providers.OpenAIOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post(@token_url, body: body, headers: headers) do
+    case Req.post(@token_url, [body: body, headers: headers] ++ @req_options) do
       {:ok, %Req.Response{status: 200, body: response_body}} ->
         {:ok,
          %{

@@ -22,6 +22,7 @@ defmodule FrontmanServer.Providers.AnthropicOAuth do
   @token_url Application.compile_env!(:frontman_server, [__MODULE__, :token_url])
   @redirect_uri Application.compile_env!(:frontman_server, [__MODULE__, :redirect_uri])
   @scopes Application.compile_env!(:frontman_server, [__MODULE__, :scopes])
+  @req_options Application.compile_env(:frontman_server, [__MODULE__, :req_options], [])
 
   @doc """
   Generates a PKCE verifier and challenge.
@@ -90,7 +91,7 @@ defmodule FrontmanServer.Providers.AnthropicOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post(@token_url, json: body, headers: headers) do
+    case Req.post(@token_url, [json: body, headers: headers] ++ @req_options) do
       {:ok, %Req.Response{status: 200, body: response_body}} ->
         {:ok,
          %{
@@ -129,7 +130,7 @@ defmodule FrontmanServer.Providers.AnthropicOAuth do
       {"accept", "application/json"}
     ]
 
-    case Req.post(@token_url, json: body, headers: headers) do
+    case Req.post(@token_url, [json: body, headers: headers] ++ @req_options) do
       {:ok, %Req.Response{status: 200, body: response_body}} ->
         {:ok,
          %{

@@ -64,6 +64,12 @@ config :frontman_server, :web_fetch_req_options,
   retry_delay: fn _ -> 0 end,
   retry_log_level: false
 
+config :frontman_server, FrontmanServer.Providers.AnthropicOAuth,
+  req_options: [plug: {Req.Test, :anthropic_oauth}, retry: false]
+
+config :frontman_server, FrontmanServer.Providers.OpenAIOAuth,
+  req_options: [plug: {Req.Test, :openai_oauth}, retry: false]
+
 # Sentry - enable test mode, disable dedup to avoid test interference
 config :sentry,
   test_mode: true,
