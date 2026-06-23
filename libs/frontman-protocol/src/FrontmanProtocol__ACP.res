@@ -1,8 +1,6 @@
 // ACP (Agent Client Protocol) Types
 // Based on: https://github.com/agentclientprotocol/agent-client-protocol/schema/schema.json
 
-S.enableJson()
-
 // Protocol version is an integer (uint16 in spec)
 type protocolVersion = int
 let currentProtocolVersion = 1
@@ -87,6 +85,11 @@ type initializeParams = {
   clientCapabilities: option<clientCapabilities>,
   @as("clientInfo")
   clientInfo: option<implementation>,
+}
+
+let initializeParamsToJson = (params: initializeParams): JSON.t => {
+  params->S.assertOrThrow(~to=initializeParamsSchema)
+  params->JSON.stringifyAny->Option.getOrThrow->JSON.parseOrThrow
 }
 
 // Initialize response result
@@ -362,7 +365,6 @@ type blobResourceContents = {
   blob: string,
 }
 
-// EmbeddedResourceResource union type
 type embeddedResourceResource =
   | TextResourceContents(textResourceContents)
   | BlobResourceContents(blobResourceContents)
@@ -471,16 +473,6 @@ let contentBlockSchema = S.union([
     })
   }),
 ])
-
-let embeddedResourceSchema = S.object(s => {
-  _meta: s.field("_meta", S.option(S.json)),
-  annotations: s.field("annotations", S.option(annotationsSchema)),
-  resource: s.field("resource", embeddedResourceResourceSchema),
-})
-
-let annotationsSchema = S.object(s => {
-  _meta: s.field("_meta", S.option(S.json)),
-})
 
 // Tool call content item (for tool_call_update)
 type toolCallContentItem = {

@@ -9,6 +9,7 @@ module ToolRegistry = FrontmanCore__ToolRegistry
 type executionContext = {
   projectRoot: string,
   sourceRoot: string,
+  @live
   onProgress: option<string => unit>,
 }
 
@@ -37,16 +38,25 @@ let executeTool = async (
 
     let inputJson = arguments->Option.getOr(Dict.make())->JSON.Encode.object
 
-    try {
-      let input = inputJson->S.parseOrThrow(T.inputSchema)
-      let result = await T.execute(toolCtx, input)
-      Ok(result)
+    let inputResult: result<T.input, string> = try {
+      Ok(inputJson->S.parseOrThrow(~to=T.inputSchema))
     } catch {
-    | S.Error(e) => InvalidInput(e.message)
     | exn =>
-      let msg =
-        exn->JsExn.fromException->Option.flatMap(JsExn.message)->Option.getOr("Unknown error")
-      ExecutionError(msg)
+      Error(exn->JsExn.fromException->Option.flatMap(JsExn.message)->Option.getOr("Invalid input"))
+    }
+
+    switch inputResult {
+    | Error(msg) => InvalidInput(msg)
+    | Ok(input) =>
+      try {
+        let result = await T.execute(toolCtx, input)
+        Ok(result)
+      } catch {
+      | exn =>
+        let msg =
+          exn->JsExn.fromException->Option.flatMap(JsExn.message)->Option.getOr("Unknown error")
+        ExecutionError(msg)
+      }
     }
   }
 }

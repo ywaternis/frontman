@@ -10,7 +10,7 @@ module Log = FrontmanLogs.Logs.Make({
 
 type relayState =
   | Disconnected
-  | Connected({tools: array<Types.remoteTool>, serverInfo: MCPTypes.info})
+  | Connected({tools: array<Types.remoteTool>, @live serverInfo: MCPTypes.info})
   | Error(string)
 
 type t = {
@@ -19,6 +19,7 @@ type t = {
   state: ref<relayState>,
 }
 
+@@live
 let make = (~baseUrl: string, ~requestHeaders: Dict.t<string>=Dict.make()): t => {
   baseUrl,
   requestHeaders,
@@ -87,6 +88,7 @@ let connect = async (relay: t, ~signal: option<WebAPI.EventAPI.abortSignal>=?): 
 }
 
 // Disconnect (reset state)
+@@live
 let disconnect = (relay: t): unit => {
   relay.state := Disconnected
 }
@@ -132,7 +134,8 @@ let executeTool = async (
     Log.debug(~ctx={"tool": name}, "Executing relay tool")
     let url = `${relay.baseUrl}/frontman/tools/call`
     let request: Types.toolCallRequest = {name, arguments}
-    let body = request->S.reverseConvertToJsonOrThrow(Types.toolCallRequestSchema)
+    let body =
+      request->S.decodeOrThrow(~from=Types.toolCallRequestSchema, ~to=S.json->S.noValidation(true))
     let headers = Dict.fromArray([
       ("Content-Type", "application/json"),
       ("Accept", "text/event-stream"),
