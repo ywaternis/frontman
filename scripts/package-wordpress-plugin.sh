@@ -28,7 +28,7 @@ mkdir -p "$DIST_DIR"
 mkdir -p "$PLUGIN_DIR" "$WPORG_DIR/trunk" "$WPORG_DIR/tags/$VERSION"
 
 rsync -a --delete --exclude '.DS_Store' --exclude '.wordpress-org/' --exclude 'tests/' --exclude 'package.json' "$PLUGIN_SRC/" "$PLUGIN_DIR/"
-rsync -a --delete --exclude '.DS_Store' --exclude '.wordpress-org/' --exclude 'tests/' --exclude 'package.json' "$PLUGIN_SRC/" "$WPORG_DIR/trunk/"
+rsync -a --delete --exclude '.DS_Store' --exclude '.wordpress-org/' --exclude 'tests/' --exclude 'package.json' --exclude 'CHANGELOG.md' "$PLUGIN_SRC/" "$WPORG_DIR/trunk/"
 rsync -a --delete "$WPORG_DIR/trunk/" "$WPORG_DIR/tags/$VERSION/"
 
 if [ -d "$PLUGIN_SRC/.wordpress-org/assets" ]; then
