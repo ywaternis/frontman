@@ -114,6 +114,12 @@ let getToolByName = (server: t, name: string): option<module(Tool.Tool)> => {
   })
 }
 
+let argumentKeys = (arguments: option<Dict.t<JSON.t>>): string =>
+  switch arguments {
+  | None => "none"
+  | Some(args) => args->Dict.keysToArray->Array.join(",")
+  }
+
 // Execute a local tool module
 let executeLocalTool = async (
   server: t,
@@ -135,7 +141,16 @@ let executeLocalTool = async (
 
   switch inputResult {
   | Error(msg) =>
-    Log.error(~ctx={"tool": T.name}, "Schema error")
+    Log.error(
+      ~ctx={
+        "tool": T.name,
+        "taskId": taskId,
+        "toolCallId": toolCallId,
+        "schemaError": msg,
+        "argumentKeys": argumentKeys(arguments),
+      },
+      "Tool input schema validation failed",
+    )
     Completed(
       Types.CallToolResult.makeError(`Invalid input: ${msg}`)->Types.CallToolResult.withMeta(meta),
     )
