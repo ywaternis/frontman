@@ -229,9 +229,23 @@ defmodule FrontmanServer.TasksTest do
       task_id = task_fixture(scope).id
       {:ok, user_message} = user_message_fixture(scope, task_id, user_content("not an error"))
 
-      assert_raise MatchError, fn ->
-        Tasks.retry_execution(scope, task_id, user_message.id, execution_request_fixture())
-      end
+      assert {:error, :not_found} =
+               Tasks.retry_execution(scope, task_id, user_message.id, execution_request_fixture())
+    end
+
+    test "rejects an older error after later interactions in the same turn", %{scope: scope} do
+      task_id = task_fixture(scope).id
+      insert_interaction_row(task_id, Interaction.UserMessage, 1)
+      insert_interaction_row(task_id, Interaction.AgentError, 1, %{"id" => "error-1"})
+
+      insert_interaction_row(task_id, Interaction.AgentRetry, 1, %{
+        "retried_error_id" => "error-1"
+      })
+
+      insert_interaction_row(task_id, Interaction.AgentCompleted, 1)
+
+      assert {:error, :stale_turn} =
+               Tasks.retry_execution(scope, task_id, "error-1", execution_request_fixture())
     end
   end
 

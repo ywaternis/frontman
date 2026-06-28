@@ -644,21 +644,15 @@ defmodule FrontmanServer.Tasks do
         turn_number
 
       :error ->
-        persisted_tool_call_turn_number(task_id, tool_call_id)
-    end
-  end
-
-  defp persisted_tool_call_turn_number(task_id, tool_call_id) do
-    row =
-      InteractionSchema.for_task(task_id)
-      |> InteractionSchema.of_type(Interaction.ToolCall)
-      |> InteractionSchema.data_equals("tool_call_id", tool_call_id)
-      |> Repo.one()
-
-    case row do
-      %InteractionSchema{turn_number: turn_number}
-      when is_integer(turn_number) and turn_number > 0 ->
-        turn_number
+        InteractionSchema.for_task(task_id)
+        |> InteractionSchema.of_type(Interaction.ToolCall)
+        |> InteractionSchema.data_equals("tool_call_id", tool_call_id)
+        |> Repo.one()
+        |> case do
+          %InteractionSchema{turn_number: turn_number}
+          when is_integer(turn_number) and turn_number > 0 ->
+            turn_number
+        end
     end
   end
 
@@ -701,7 +695,7 @@ defmodule FrontmanServer.Tasks do
     with {:ok, schema} <- get_task_by_id(scope, task_id),
          rows = load_interaction_rows(task_id),
          {:ok, turn_number} <- retry_turn_number(task_id, retried_error_id),
-         :ok <- ensure_latest_retry_turn(turn_number, rows),
+         :ok <- ensure_latest_retry_turn(retried_error_id, turn_number, rows),
          {:ok, execution} <- ensure_execution_model(task_id, turn_number, execution),
          retry_interaction = Interaction.AgentRetry.build(retried_error_id),
          {:ok, _retry} <- record_interaction(schema, retry_interaction, turn_number) do
@@ -710,17 +704,34 @@ defmodule FrontmanServer.Tasks do
   end
 
   defp retry_turn_number(task_id, retried_error_id) do
-    %InteractionSchema{turn_number: turn_number} =
+    row =
       InteractionSchema.for_task(task_id)
       |> InteractionSchema.of_type(Interaction.AgentError)
       |> InteractionSchema.data_equals("id", retried_error_id)
       |> Repo.one()
 
-    {:ok, turn_number}
+    case row do
+      %InteractionSchema{turn_number: turn_number} ->
+        {:ok, turn_number}
+
+      nil ->
+        {:error, :not_found}
+    end
   end
 
-  defp ensure_latest_retry_turn(turn_number, rows) do
-    if turn_number == latest_turn_number(rows), do: :ok, else: {:error, :stale_turn}
+  defp ensure_latest_retry_turn(retried_error_id, turn_number, rows) do
+    latest_turn_interaction =
+      rows
+      |> Enum.reverse()
+      |> Enum.find(&(&1.turn_number == turn_number))
+
+    case {turn_number == latest_turn_number(rows), latest_turn_interaction} do
+      {true, %InteractionSchema{type: :agent_error, data: %{"id" => ^retried_error_id}}} ->
+        :ok
+
+      _ ->
+        {:error, :stale_turn}
+    end
   end
 
   @doc "Resumes execution for the active agent run."
