@@ -30,6 +30,8 @@ defmodule FrontmanServer.Application do
     :error_message
   ]
 
+  @reqllm_finch_client_file "lib/req_llm/streaming/finch_client.ex"
+
   @impl true
   def start(_type, _args) do
     # Setup console telemetry logging in dev
@@ -39,6 +41,7 @@ defmodule FrontmanServer.Application do
 
     # Capture crashes plus all Logger.error/2 messages as Sentry events.
     :logger.add_handler(:sentry_handler, Sentry.LoggerHandler, %{
+      filters: [reqllm_rate_limit_filter: {&__MODULE__.sentry_logger_filter/2, []}],
       config: %{
         capture_log_messages: true,
         level: :error,
@@ -67,6 +70,39 @@ defmodule FrontmanServer.Application do
     opts = [strategy: :one_for_one, name: FrontmanServer.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  def sentry_logger_filter(%{msg: msg, meta: meta}, _opts) do
+    message = logger_message_to_string(msg)
+    file = logger_file_to_string(Map.get(meta, :file))
+
+    case {reqllm_finch_client_file?(file), message} do
+      {true, "Finch streaming failed: " <> rest} ->
+        case String.contains?(rest, "status: 429") do
+          true -> :stop
+          false -> :ignore
+        end
+
+      _other ->
+        :ignore
+    end
+  end
+
+  defp logger_file_to_string(file) when is_binary(file), do: file
+  defp logger_file_to_string(file) when is_list(file), do: IO.chardata_to_string(file)
+  defp logger_file_to_string(_file), do: nil
+
+  defp reqllm_finch_client_file?(nil), do: false
+  defp reqllm_finch_client_file?(file), do: String.ends_with?(file, @reqllm_finch_client_file)
+
+  defp logger_message_to_string({:string, chardata}), do: IO.chardata_to_string(chardata)
+
+  defp logger_message_to_string({format, args}) when is_list(args) do
+    format
+    |> :io_lib.format(args)
+    |> IO.chardata_to_string()
+  end
+
+  defp logger_message_to_string(message), do: inspect(message)
 
   # Tell Phoenix to update the endpoint configuration
   # whenever the application is updated.
