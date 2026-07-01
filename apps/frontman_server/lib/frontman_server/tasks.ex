@@ -19,6 +19,7 @@ defmodule FrontmanServer.Tasks do
     TaskSchema,
     Interaction,
     Interaction.UserMessage,
+    Interaction.TurnStarted,
     Interaction.AgentResponse,
     Interaction.AgentCompleted,
     Interaction.AgentError,
@@ -56,7 +57,8 @@ defmodule FrontmanServer.Tasks do
   require Logger
 
   @task_scoped_interaction_types Interaction.task_scoped_types()
-  @agent_run_starter_interaction_types [:user_message, :agent_retry]
+  @accepted_message_interaction_types [:user_message]
+  @agent_run_starter_interaction_types [:turn_started, :agent_retry]
   @agent_run_terminal_interaction_types [:agent_completed, :agent_error, :agent_paused]
   @agent_run_interaction_types [:agent_response, :tool_call, :tool_result]
 
@@ -245,6 +247,10 @@ defmodule FrontmanServer.Tasks do
     |> Enum.reduce_while(nil, fn
       %InteractionSchema{type: type, turn_number: nil}, active_run_turn_number
       when type in @task_scoped_interaction_types ->
+        {:cont, active_run_turn_number}
+
+      %InteractionSchema{type: type, turn_number: nil}, active_run_turn_number
+      when type in @accepted_message_interaction_types ->
         {:cont, active_run_turn_number}
 
       %InteractionSchema{type: type, turn_number: nil}, _active_run_turn_number ->
@@ -492,35 +498,24 @@ defmodule FrontmanServer.Tasks do
   # --- Conversation Lifecycle ---
 
   @doc """
-  Submits a user prompt: persists the message and starts agent execution.
+  Accepts a user prompt into session history.
 
-  This is the primary "user turn" use case — recording what the user said
-  and kicking off the agent loop. If an execution is already running, the
-  prompt is rejected entirely (nothing persisted).
+  Starting execution is handled separately by `run_next_turn/3`.
   """
   def submit_user_message(
         %Scope{} = scope,
         %{
           task_id: task_id,
           message: [_ | _] = content_blocks,
-          model: model,
-          mcp_tools: mcp_tools,
-          project_traits: project_traits
+          model: model
         }
       )
-      when is_binary(task_id) and is_binary(model) and model != "" and is_list(mcp_tools) and
-             is_list(project_traits) do
+      when is_binary(task_id) and is_binary(model) and model != "" do
     with {:ok, user_message_interaction} <- Interaction.UserMessage.build(content_blocks, model),
-         {:ok, {task_schema, turn_number}} <-
-           insert_user_turn_for_locked_task(scope, task_id, user_message_interaction) do
-      _ =
-        run_execution(scope, task_schema, turn_number, %{
-          model: model,
-          mcp_tools: mcp_tools,
-          project_traits: project_traits
-        })
-
-      if turn_number == 1 do
+         {:ok, task_schema} <- get_task_by_id(scope, task_id),
+         first_message? <- accepted_user_message_count(task_id) == 0,
+         {:ok, accepted_message} <- record_interaction(task_schema, user_message_interaction) do
+      if first_message? do
         GenerateTitle.new(%{
           user_id: scope.user.id,
           task_id: task_id,
@@ -530,7 +525,7 @@ defmodule FrontmanServer.Tasks do
         |> Oban.insert!()
       end
 
-      {:ok, user_message_interaction, turn_number}
+      {:ok, accepted_message}
     end
   end
 
@@ -538,34 +533,115 @@ defmodule FrontmanServer.Tasks do
     {:error, :missing_model}
   end
 
-  defp insert_user_turn_for_locked_task(%Scope{} = scope, task_id, user_message_interaction) do
+  defp accepted_user_message_count(task_id) do
+    task_id
+    |> load_interaction_rows()
+    |> Enum.count(&(&1.type == :user_message))
+  end
+
+  defp start_next_turn(%Scope{} = scope, task_id) when is_binary(task_id) do
+    case claim_next_turn(scope, task_id) do
+      {:ok, {task_schema, turn_started, turn_number, turn_model}} ->
+        broadcast_task(task_id, {:interaction, turn_started, turn_number})
+        {:ok, task_schema, turn_number, turn_started, turn_model}
+
+      {:error, :already_running} ->
+        :already_running
+
+      {:error, :no_accepted_messages} ->
+        :no_accepted_messages
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp claim_next_turn(scope, task_id) do
     Repo.transact(fn ->
-      with %TaskSchema{} = task_schema <- get_task_by_id_for_update(scope, task_id),
-           {:ok, turn_number} <- insert_user_turn_if_idle(task_schema, user_message_interaction) do
-        {:ok, {task_schema, turn_number}}
-      else
+      case get_task_by_id_for_update(scope, task_id) do
+        %TaskSchema{} = task_schema -> claim_next_turn_for_task(task_schema, task_id)
         nil -> {:error, :not_found}
-        {:error, reason} -> {:error, reason}
       end
     end)
   end
 
-  defp insert_user_turn_if_idle(%TaskSchema{} = task_schema, interaction) do
-    rows = load_interaction_rows(task_schema.id)
+  defp claim_next_turn_for_task(task_schema, task_id) do
+    rows = load_interaction_rows(task_id)
 
-    case active_agent_run_turn_number(rows) do
-      {:ok, nil} ->
+    case {active_agent_run_turn_number(rows), accepted_messages_not_in_turn(rows)} do
+      {{:ok, nil}, [_ | _] = accepted_messages} ->
         turn_number = next_turn_number(rows)
+        user_message_ids = Enum.map(accepted_messages, & &1.id)
+        turn_started = Interaction.TurnStarted.build(user_message_ids)
 
-        with {:ok, _interaction} <- record_interaction(task_schema, interaction, turn_number) do
-          {:ok, turn_number}
+        with {:ok, turn_model} <- turn_model_for_accepted_messages(accepted_messages),
+             {:ok, turn_started_row} <-
+               insert_turn_started(task_schema, turn_started, turn_number) do
+          {:ok,
+           {task_schema, InteractionSchema.to_struct(turn_started_row), turn_number, turn_model}}
+        else
+          {:error, reason} ->
+            {:error, reason}
         end
 
-      {:ok, _turn_number} ->
+      {{:ok, nil}, []} ->
+        {:error, :no_accepted_messages}
+
+      {{:ok, _turn_number}, _accepted_messages} ->
         {:error, :already_running}
 
-      {:error, reason} ->
+      {{:error, reason}, _accepted_messages} ->
         {:error, reason}
+    end
+  end
+
+  defp turn_model_for_accepted_messages(accepted_messages) do
+    case List.last(accepted_messages) do
+      %InteractionSchema{data: %Interaction.UserMessage{model: model}}
+      when is_binary(model) and model != "" ->
+        {:ok, model}
+
+      _missing ->
+        {:error, :missing_model}
+    end
+  end
+
+  defp accepted_messages_not_in_turn(rows) do
+    message_ids_already_in_turns =
+      rows
+      |> Enum.flat_map(fn
+        %InteractionSchema{
+          type: :turn_started,
+          data: %Interaction.TurnStarted{user_message_ids: ids}
+        } ->
+          ids
+
+        _row ->
+          []
+      end)
+      |> MapSet.new()
+
+    Enum.filter(rows, fn
+      %InteractionSchema{type: :user_message, turn_number: nil, id: id} ->
+        not MapSet.member?(message_ids_already_in_turns, id)
+
+      _row ->
+        false
+    end)
+  end
+
+  defp insert_turn_started(%TaskSchema{} = task_schema, turn_started, turn_number) do
+    with {:ok, schema} <-
+           InteractionSchema.create_changeset(task_schema, turn_started, turn_number)
+           |> Repo.insert(),
+         {1, _} <-
+           TaskSchema
+           |> TaskSchema.by_id(task_schema.id)
+           |> Repo.update_all(set: [updated_at: DateTime.utc_now(:second)]) do
+      {:ok, schema}
+    else
+      {:error, reason} -> {:error, reason}
+      {0, _} -> {:error, :not_found}
     end
   end
 
@@ -666,9 +742,9 @@ defmodule FrontmanServer.Tasks do
   @doc """
   Returns unresolved tool calls and turn number for the active agent run.
 
-  A user message starts a turn and its first agent run. Agent retry starts a new
-  agent run in the same turn. Agent completed, error, and paused interactions
-  close only the active run attempt for their turn number.
+  `TurnStarted` starts a normal agent run. `AgentRetry` starts a new agent run
+  in the same turn. Agent completed, error, and paused interactions close only
+  the active run attempt for their turn number.
   """
   def get_active_run_unresolved_tool_calls(scope, task_id) do
     with {:ok, _schema} <- get_task_by_id(scope, task_id) do
@@ -701,23 +777,41 @@ defmodule FrontmanServer.Tasks do
   def retry_execution(scope, task_id, retried_error_id, execution) do
     with {:ok, schema} <- get_task_by_id(scope, task_id),
          rows = load_interaction_rows(task_id),
-         {:ok, turn_number} <- retry_turn_number(task_id, retried_error_id),
+         {:ok, turn_number} <- retry_turn_number(rows, retried_error_id),
          :ok <- ensure_latest_retry_turn(retried_error_id, turn_number, rows),
-         {:ok, execution} <- ensure_execution_model(task_id, turn_number, execution),
+         {:ok, execution} <- ensure_execution_model(rows, turn_number, execution),
          retry_interaction = Interaction.AgentRetry.build(retried_error_id),
          {:ok, _retry} <- record_interaction(schema, retry_interaction, turn_number) do
       run_execution(scope, schema, turn_number, execution)
     end
   end
 
-  defp retry_turn_number(task_id, retried_error_id) do
-    row =
-      InteractionSchema.for_task(task_id)
-      |> InteractionSchema.of_type(Interaction.AgentError)
-      |> InteractionSchema.data_equals("id", retried_error_id)
-      |> Repo.one()
+  @doc "Starts and runs the next accepted-message turn when work is available."
+  def run_next_turn(%Scope{} = scope, task_id, execution) when is_binary(task_id) do
+    case start_next_turn(scope, task_id) do
+      {:ok, task, turn_number, _turn_started, turn_model} ->
+        with {:ok, execution} <- put_missing_execution_model(execution, turn_model) do
+          run_execution(scope, task, turn_number, execution)
+        end
 
-    case row do
+      stop when stop in [:already_running, :no_accepted_messages] ->
+        stop
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp retry_turn_number(rows, retried_error_id) do
+    rows
+    |> Enum.find(fn
+      %InteractionSchema{type: :agent_error, data: %Interaction.AgentError{id: ^retried_error_id}} ->
+        true
+
+      _row ->
+        false
+    end)
+    |> case do
       %InteractionSchema{turn_number: turn_number} ->
         {:ok, turn_number}
 
@@ -733,7 +827,11 @@ defmodule FrontmanServer.Tasks do
       |> Enum.find(&(&1.turn_number == turn_number))
 
     case {turn_number == latest_turn_number(rows), latest_turn_interaction} do
-      {true, %InteractionSchema{type: :agent_error, data: %{"id" => ^retried_error_id}}} ->
+      {true,
+       %InteractionSchema{
+         type: :agent_error,
+         data: %Interaction.AgentError{id: ^retried_error_id}
+       }} ->
         :ok
 
       _ ->
@@ -746,7 +844,7 @@ defmodule FrontmanServer.Tasks do
     with {:ok, task} <- get_task(scope, task_id),
          rows = load_interaction_rows(task_id),
          {:ok, turn_number} when is_integer(turn_number) <- active_agent_run_turn_number(rows),
-         {:ok, execution} <- ensure_execution_model(task_id, turn_number, execution) do
+         {:ok, execution} <- ensure_execution_model(rows, turn_number, execution) do
       run_execution(scope, task, turn_number, execution)
     else
       {:ok, nil} -> {:error, :not_running}
@@ -754,26 +852,50 @@ defmodule FrontmanServer.Tasks do
     end
   end
 
-  defp ensure_execution_model(_task_id, _turn_number, %{model: model} = execution)
+  defp ensure_execution_model(_rows, _turn_number, %{model: model} = execution)
        when is_binary(model) and model != "" do
     {:ok, execution}
   end
 
-  defp ensure_execution_model(task_id, turn_number, execution) do
-    case model_for_turn(task_id, turn_number) do
+  defp ensure_execution_model(rows, turn_number, execution) do
+    case turn_model_from_rows(rows, turn_number) do
       {:ok, model} -> {:ok, Map.put(execution, :model, model)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp model_for_turn(task_id, turn_number) do
-    InteractionSchema.for_task(task_id)
-    |> InteractionSchema.for_turn(turn_number)
-    |> InteractionSchema.of_type(Interaction.UserMessage)
-    |> Repo.one()
+  defp put_missing_execution_model(%{model: model} = execution, _turn_model)
+       when is_binary(model) and model != "" do
+    {:ok, execution}
+  end
+
+  defp put_missing_execution_model(execution, turn_model)
+       when is_binary(turn_model) and turn_model != "" do
+    {:ok, Map.put(execution, :model, turn_model)}
+  end
+
+  defp turn_model_from_rows(rows, turn_number) do
+    rows
+    |> Enum.find(fn
+      %InteractionSchema{type: :turn_started, turn_number: ^turn_number} -> true
+      _row -> false
+    end)
     |> case do
-      %InteractionSchema{data: %{"model" => model}} when is_binary(model) and model != "" ->
-        {:ok, model}
+      %InteractionSchema{data: %Interaction.TurnStarted{user_message_ids: user_message_ids}} ->
+        messages_by_id =
+          rows
+          |> Enum.filter(&(&1.type == :user_message))
+          |> Map.new(fn %InteractionSchema{id: id, data: %Interaction.UserMessage{} = message} ->
+            {id, message}
+          end)
+
+        case user_message_ids |> Enum.map(&Map.fetch!(messages_by_id, &1)) |> List.last() do
+          %Interaction.UserMessage{model: model} when is_binary(model) and model != "" ->
+            {:ok, model}
+
+          _missing ->
+            {:error, :missing_model}
+        end
 
       _missing ->
         {:error, :missing_model}

@@ -79,6 +79,7 @@ module Task = {
         activePopupAnnotationId: option<string>,
         isAgentRunning: bool,
         planEntries: array<ACPTypes.planEntry>,
+        queuedUserMessages: array<Message.t>,
         turnError: option<turnErrorInfo>,
         retryStatus: option<retryStatus>,
         // User-attached images keyed by URI (e.g., "attachment://att_abc123/image.png")
@@ -282,6 +283,7 @@ module Task = {
         activePopupAnnotationId,
         isAgentRunning: false,
         planEntries: [],
+        queuedUserMessages: [],
         turnError: None,
         retryStatus: None,
         imageAttachments: Dict.make(),
@@ -299,6 +301,7 @@ module Task = {
     activePopupAnnotationId: option<string>,
     isAgentRunning: bool,
     planEntries: array<ACPTypes.planEntry>,
+    queuedUserMessages: array<Message.t>,
     turnError: option<turnErrorInfo>,
     pendingQuestion: option<Client__Question__Types.pendingQuestion>,
   }
@@ -329,6 +332,7 @@ module Task = {
         activePopupAnnotationId,
         isAgentRunning,
         planEntries,
+        queuedUserMessages,
         turnError,
         retryStatus,
         imageAttachments,
@@ -341,6 +345,7 @@ module Task = {
           activePopupAnnotationId,
           isAgentRunning,
           planEntries,
+          queuedUserMessages,
           turnError,
           pendingQuestion,
         }
@@ -358,6 +363,7 @@ module Task = {
           activePopupAnnotationId: updated.activePopupAnnotationId,
           isAgentRunning: updated.isAgentRunning,
           planEntries: updated.planEntries,
+          queuedUserMessages: updated.queuedUserMessages,
           turnError: updated.turnError,
           retryStatus,
           imageAttachments,
@@ -382,6 +388,7 @@ module Task = {
           activePopupAnnotationId,
           isAgentRunning: false,
           planEntries: [],
+          queuedUserMessages: [],
           turnError: None,
           pendingQuestion: None,
         }
@@ -406,6 +413,7 @@ module Task = {
           activePopupAnnotationId,
           isAgentRunning: false,
           planEntries: [],
+          queuedUserMessages: [],
           turnError: None,
           pendingQuestion: None,
         }

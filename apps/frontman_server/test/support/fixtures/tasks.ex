@@ -55,8 +55,13 @@ defmodule FrontmanServer.Test.Fixtures.Tasks do
   end
 
   @doc "Persist a user message and return its turn number."
-  def start_turn_fixture(scope, task_id, content_blocks \\ user_content("test turn")) do
-    {:ok, _message} = user_message_fixture(scope, task_id, content_blocks)
+  def start_turn_fixture(
+        scope,
+        task_id,
+        content_blocks \\ user_content("test turn"),
+        model \\ @default_test_model
+      ) do
+    {:ok, _message} = user_message_fixture(scope, task_id, content_blocks, model)
     latest_turn_number(task_id)
   end
 
@@ -74,14 +79,18 @@ defmodule FrontmanServer.Test.Fixtures.Tasks do
   @doc """
   Persist a user message for tests without invoking the production execution API.
   """
-  def user_message_fixture(scope, task_id, content_blocks) do
+  def user_message_fixture(scope, task_id, content_blocks, model \\ @default_test_model) do
     task = task_schema!(scope, task_id)
-    {:ok, interaction} = Interaction.UserMessage.build(content_blocks, @default_test_model)
+    {:ok, interaction} = Interaction.UserMessage.build(content_blocks, model)
 
-    case InteractionSchema.create_changeset(task, interaction, next_turn_number(task_id))
-         |> Repo.insert() do
-      {:ok, _schema} -> {:ok, interaction}
-      error -> error
+    with {:ok, row} <-
+           InteractionSchema.create_changeset(task, interaction, nil)
+           |> Repo.insert(),
+         turn_started = Interaction.TurnStarted.build([row.id]),
+         {:ok, _turn_started} <-
+           InteractionSchema.create_changeset(task, turn_started, next_turn_number(task_id))
+           |> Repo.insert() do
+      {:ok, interaction}
     end
   end
 

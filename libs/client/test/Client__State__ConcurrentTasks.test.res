@@ -142,7 +142,6 @@ describe("Concurrent Tasks Event Routing", () => {
       input: Some(JSON.parseOrThrow(`{"path": "file.txt"}`)),
       result: None,
       errorText: None,
-      createdAt: Date.now(),
       parentAgentId: None,
       spawningToolName: None,
     }
@@ -239,7 +238,7 @@ describe("Concurrent Tasks Event Routing", () => {
     t->expect(getStreamingText(taskC))->Expect.toBe("C")
   })
 
-  test("TurnCompleted event routes to correct task", t => {
+  test("ExecutionStateIdle routes to correct task", t => {
     // Setup: Task A with streaming message, Task B is current
     let taskAId = "task-a"
     let taskBId = "task-b"
@@ -267,7 +266,7 @@ describe("Concurrent Tasks Event Routing", () => {
     // Act: Complete the message in Task A
     let (finalState, _) = StateReducer.next(
       stateWithText,
-      TaskAction({target: ForTask(taskAId), action: TurnCompleted}),
+      TaskAction({target: ForTask(taskAId), action: ExecutionStateIdle}),
     )
 
     // Assert: Message in Task A should be completed
@@ -319,7 +318,6 @@ describe("Concurrent Tasks Event Routing", () => {
       input: Some(JSON.parseOrThrow(`{"path": "file.txt"}`)),
       result: None,
       errorText: None,
-      createdAt: Date.now(),
       parentAgentId: None,
       spawningToolName: None,
     }

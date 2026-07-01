@@ -52,6 +52,20 @@ module Lens = {
     updateMessages(task, store => MessageStore.insert(store, message))
   }
 
+  let drainQueuedUserMessages = (task: Task.t): Task.t =>
+    switch task {
+    | Task.Loaded({queuedUserMessages: []}) => task
+    | Task.Loaded(data) =>
+      Task.Loaded({
+        ...data,
+        messages: MessageStore.fromArray(
+          Array.concat(MessageStore.toArray(data.messages), data.queuedUserMessages),
+        ),
+        queuedUserMessages: [],
+      })
+    | _ => task
+    }
+
   // Get the streaming message (at most one per task)
   // INVARIANT: Only one streaming message can exist at a time.
   let getStreamingMessage = (task: Task.t): option<Message.assistantMessage> => {
@@ -202,6 +216,13 @@ module Selectors = {
     }
   }
 
+  let queuedUserMessages = (task: Task.t): option<array<Message.t>> => {
+    switch task {
+    | Task.New(_) | Task.Unloaded(_) | Task.Loading(_) => None
+    | Task.Loaded({queuedUserMessages}) => Some(queuedUserMessages)
+    }
+  }
+
   // Get plan entries
   // None = Unloaded, New, or Loading (not applicable)
   let planEntries = (task: Task.t): option<array<ACPTypes.planEntry>> => {
@@ -235,17 +256,6 @@ module Selectors = {
     switch task {
     | Task.New(_) | Task.Unloaded(_) | Task.Loading(_) => None
     | Task.Loaded({turnError}) => turnError
-    }
-  }
-
-  // Get message created at timestamp
-  let getMessageCreatedAt = (msg: Message.t): float => {
-    switch msg {
-    | Message.User({createdAt, _}) => createdAt
-    | Message.Assistant(Streaming({createdAt, _})) => createdAt
-    | Message.Assistant(Completed({createdAt, _})) => createdAt
-    | Message.ToolCall({createdAt, _}) => createdAt
-    | Message.Error(err) => Message.ErrorMessage.createdAt(err)
     }
   }
 
@@ -327,7 +337,9 @@ type action =
   | ToggleDeviceMode
   // Plan/Turn actions
   | PlanReceived({entries: array<ACPTypes.planEntry>})
-  | TurnCompleted
+  | ExecutionStateRunning
+  | ExecutionStateIdle
+  | ExecutionStateRequiresAction
   | CancelTurn
   // Error actions
   | AgentError({id: string, error: string, timestamp: string, category: string})
@@ -343,7 +355,6 @@ type action =
       id: string,
       content: array<UserContentPart.t>,
       annotations: array<Message.MessageAnnotation.t>,
-      timestamp: string,
     })
   // Question tool actions
   | QuestionReceived({
@@ -418,7 +429,9 @@ let actionToString = (action: action): string =>
   | SetOrientation(_) => "SetOrientation"
   | ToggleDeviceMode => "ToggleDeviceMode"
   | PlanReceived(_) => "PlanReceived"
-  | TurnCompleted => "TurnCompleted"
+  | ExecutionStateRunning => "ExecutionStateRunning"
+  | ExecutionStateIdle => "ExecutionStateIdle"
+  | ExecutionStateRequiresAction => "ExecutionStateRequiresAction"
   | CancelTurn => "CancelTurn"
   | AgentError(_) => "AgentError"
   | RetryingUpdate(_) => "RetryingUpdate"
@@ -553,9 +566,7 @@ let resolveQuestion = (task: Task.t, ~skippedAll: bool, ~cancelled: bool): (
     | false =>
       let answerJson = buildQuestionToolOutput(pq, ~skippedAll, ~cancelled)
       (
-        // Set isAgentRunning: true because resolving the tool promise will resume
-        // the agent. Without this, the streaming guard (isAgentRunning: false drops
-        // all TextDeltaReceived) would silently discard the agent's response.
+        // Resolving the tool promise resumes the agent until state_update catches up.
         Task.Loaded({...data, pendingQuestion: None, isAgentRunning: true}),
         [ResolveQuestionToolEffect({resolveOk: pq.resolveOk, answerJson})],
       )
@@ -766,19 +777,6 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
   // Message Actions - work on Loading or Loaded (via Lens)
   // ============================================================================
 
-  // Guard: drop stale streaming events that arrive after cancel
-  // When a turn is cancelled, isAgentRunning is set to false. Any streaming
-  // events that arrive after that are late echoes from the killed agent process.
-  | (
-      Task.Loaded({isAgentRunning: false}),
-      StreamingStarted
-      | TextDeltaReceived(_)
-      | ToolCallReceived(_)
-      | ToolInputReceived(_)
-      | ToolResultReceived(_)
-      | ToolErrorReceived(_),
-    ) => (task, [])
-
   | (Task.Loading(_) | Task.Loaded(_), StreamingStarted) =>
     switch Lens.getStreamingMessage(task) {
     | Some(_) =>
@@ -894,20 +892,28 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
       [],
     )
 
-  // Hydration: user messages replayed from history
-  // Per ACP spec: a new user message signals the end of the previous agent message
-  | (Task.Loading(_), UserMessageReceived({id, content, annotations, timestamp})) =>
-    let createdAt = Date.fromString(timestamp)->Date.getTime
-    let userMessage = Message.User({id, content, annotations, createdAt})
+  // Accepted user messages from server history replay.
+  // Per ACP spec: a new history user message signals the end of the previous agent message.
+  | (Task.Loading(_), UserMessageReceived({id, content, annotations})) =>
+    let userMessage = Message.User({id, content, annotations})
     (task->Lens.completeStreamingMessage->Lens.insertMessage(userMessage), [])
+
+  | (Task.Loaded(data), UserMessageReceived({id, content, annotations})) =>
+    let userMessage = Message.User({id, content, annotations})
+    (
+      Task.Loaded({
+        ...data,
+        queuedUserMessages: Array.concat(data.queuedUserMessages, [userMessage]),
+      }),
+      [],
+    )
 
   // ============================================================================
   // Loaded-only Actions - require isAgentRunning or planEntries
   // ============================================================================
-  | (Task.Loaded(data), AddUserMessage({id, content, annotations})) =>
+  | (Task.Loaded(data), AddUserMessage({id: _, content, annotations})) =>
     let text = extractTextFromUserContent(content)
     let attachments = extractAttachmentsFromUserContent(content)
-    let message = Message.User({id, content, annotations, createdAt: Date.now()})
 
     // Accumulate image attachments keyed by URI for write_file image_ref resolution
     let updatedImageAttachments = data.imageAttachments->Dict.copy
@@ -919,8 +925,6 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
     (
       Task.Loaded({
         ...data,
-        messages: MessageStore.insert(data.messages, message),
-        isAgentRunning: true,
         turnError: None, // Clear any previous error when sending a new message
         retryStatus: None,
         imageAttachments: updatedImageAttachments,
@@ -937,17 +941,21 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
       [],
     )
 
-  | (Task.Loaded(_data), TurnCompleted) =>
-    // The ACP protocol has two overlapping signals for turn completion:
-    // 1. The session/prompt RPC response (request-response channel)
-    // 2. The agent_turn_complete notification (event channel)
-    // The server sends both when an RPC is pending, so TurnCompleted may
-    // arrive twice per turn. The state transitions below are idempotent.
+  | (Task.Loaded(data), ExecutionStateRunning) =>
+    let task = Task.Loaded({...data, isAgentRunning: true, turnError: None, retryStatus: None})
+    (Lens.drainQueuedUserMessages(task), [])
+
+  | (Task.Loaded(_data), ExecutionStateIdle) =>
     let completed = task->Lens.completeStreamingMessage
     switch completed {
     | Task.Loaded(d) => (Task.Loaded({...d, isAgentRunning: false, retryStatus: None}), [])
     | other => (other->Task.updateLoadedData(d => {...d, isAgentRunning: false}), [])
     }
+
+  | (Task.Loaded(data), ExecutionStateRequiresAction) => (
+      Task.Loaded({...data, isAgentRunning: false, retryStatus: None}),
+      [],
+    )
 
   // Cancel the current turn: complete any partial response, stop agent, dismiss pending question
   | (Task.Loaded(data), CancelTurn) =>
@@ -1030,7 +1038,11 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
   | (Task.Loaded(data), ClearTurnError) => (Task.Loaded({...data, turnError: None}), [])
 
   | (Task.Loaded(data), RetryingUpdate({retryStatus})) => (
-      Task.Loaded({...data, retryStatus: Some(retryStatus), isAgentRunning: true}),
+      Task.Loaded({
+        ...data,
+        retryStatus: Some(retryStatus),
+        isAgentRunning: true,
+      }),
       [],
     )
 
@@ -1079,24 +1091,21 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
         annotationMode,
         annotations,
         activePopupAnnotationId,
-      }) =>
-      let sortedMessages = MessageStore.toSorted(messages, (a, b) =>
-        Selectors.getMessageCreatedAt(a) -. Selectors.getMessageCreatedAt(b)
-      )
-      (
+      }) => (
         Task.Loaded({
           id,
           clientId: None,
           title,
           createdAt,
           updatedAt,
-          messages: sortedMessages,
+          messages,
           previewFrame,
           annotationMode,
           annotations,
           activePopupAnnotationId,
           isAgentRunning: false,
           planEntries: [],
+          queuedUserMessages: [],
           turnError: None,
           retryStatus: None,
           imageAttachments: Dict.make(),
@@ -1232,8 +1241,8 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
         )} task ${getTaskIdForError(task)}`,
     )
 
-  // UserMessageReceived is hydration-only — valid during Loading
-  | (Task.New(_) | Task.Loaded(_) | Task.Unloaded(_), UserMessageReceived(_)) =>
+  // UserMessageReceived requires a server-backed task.
+  | (Task.New(_) | Task.Unloaded(_), UserMessageReceived(_)) =>
     failwith(
       `[TaskReducer] ${actionToString(action)} on ${Task.stateToString(
           task,
@@ -1245,7 +1254,9 @@ let next = (task: Task.t, action: action): (Task.t, array<effect>) => {
       Task.New(_) | Task.Loading(_) | Task.Unloaded(_),
       AddUserMessage(_)
       | PlanReceived(_)
-      | TurnCompleted
+      | ExecutionStateRunning
+      | ExecutionStateIdle
+      | ExecutionStateRequiresAction
       | CancelTurn
       | ClearTurnError
       | RetryingUpdate(_)

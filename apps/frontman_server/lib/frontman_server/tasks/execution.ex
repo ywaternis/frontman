@@ -28,6 +28,8 @@ defmodule FrontmanServer.Tasks.Execution do
   alias SwarmAi.Message.ContentPart
   alias SwarmAi.Message.Tool
 
+  import Ecto.Query, only: [from: 2]
+
   @doc """
   Runs an agent execution for a task.
 
@@ -106,10 +108,39 @@ defmodule FrontmanServer.Tasks.Execution do
   end
 
   defp interaction_rows(task_id, turn_number) do
+    turn_rows =
+      InteractionSchema.for_task(task_id)
+      |> InteractionSchema.up_to_turn(turn_number)
+      |> InteractionSchema.ordered()
+      |> Repo.all()
+
+    turn_rows ++ referenced_user_message_rows(task_id, turn_rows)
+  end
+
+  defp referenced_user_message_rows(task_id, turn_rows) do
+    user_message_ids =
+      turn_rows
+      |> Enum.flat_map(fn
+        %InteractionSchema{
+          type: :turn_started,
+          data: %Interaction.TurnStarted{user_message_ids: ids}
+        } ->
+          ids
+
+        _row ->
+          []
+      end)
+      |> Enum.uniq()
+
     InteractionSchema.for_task(task_id)
-    |> InteractionSchema.up_to_turn(turn_number)
+    |> InteractionSchema.of_type(Interaction.UserMessage)
+    |> where_id_in(user_message_ids)
     |> InteractionSchema.ordered()
     |> Repo.all()
+  end
+
+  defp where_id_in(query, ids) do
+    from(i in query, where: i.id in ^ids)
   end
 
   @doc """
@@ -152,14 +183,45 @@ defmodule FrontmanServer.Tasks.Execution do
   # --- Private ---
   defp prompt_messages(rows, turn_number)
        when is_list(rows) and is_integer(turn_number) and turn_number > 0 do
-    Enum.flat_map(rows, fn
-      %InteractionSchema{turn_number: row_turn} = row when row_turn < turn_number ->
-        row
-        |> row_to_messages()
-        |> Enum.map(&decay_images/1)
+    user_messages_by_row_id = user_messages_by_row_id(rows)
 
-      %InteractionSchema{turn_number: row_turn} = row when row_turn == turn_number ->
-        row_to_messages(row)
+    Enum.flat_map(rows, fn row ->
+      row
+      |> row_to_messages(user_messages_by_row_id)
+      |> decay_historical_images(row.turn_number, turn_number)
+    end)
+  end
+
+  defp row_to_messages(
+         %InteractionSchema{
+           type: :turn_started,
+           data: %Interaction.TurnStarted{user_message_ids: user_message_ids}
+         },
+         user_messages_by_row_id
+       ) do
+    user_message_ids
+    |> Enum.map(&Map.fetch!(user_messages_by_row_id, &1))
+    |> Interaction.to_swarm_messages()
+  end
+
+  defp row_to_messages(%InteractionSchema{turn_number: nil}, _user_messages_by_row_id),
+    do: []
+
+  defp row_to_messages(%InteractionSchema{} = row, _user_messages_by_row_id) do
+    row_to_messages(row)
+  end
+
+  defp decay_historical_images(messages, row_turn, turn_number)
+       when is_integer(row_turn) and row_turn < turn_number,
+       do: Enum.map(messages, &decay_images/1)
+
+  defp decay_historical_images(messages, _row_turn, _turn_number), do: messages
+
+  defp user_messages_by_row_id(rows) do
+    rows
+    |> Enum.filter(&(&1.type == :user_message))
+    |> Map.new(fn %InteractionSchema{id: id, data: %Interaction.UserMessage{} = message} ->
+      {id, message}
     end)
   end
 
