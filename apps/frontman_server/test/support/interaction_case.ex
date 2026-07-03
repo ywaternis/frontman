@@ -181,7 +181,7 @@ defmodule FrontmanServer.InteractionCase do
     @doc "Build a `%UserMessage{}` struct."
     def user_msg(messages, annotations \\ []) do
       %UserMessage{
-        id: Interaction.new_id(),
+        id: Ecto.UUID.generate(),
         messages: List.wrap(messages),
         timestamp: Interaction.now(),
         annotations: annotations
@@ -190,18 +190,53 @@ defmodule FrontmanServer.InteractionCase do
 
     @doc "Build an `%AgentResponse{}` struct."
     def agent_resp(content, metadata \\ %{}) do
-      %AgentResponse{
-        id: Interaction.new_id(),
-        content: content,
+      AgentResponse.attrs(content, metadata)
+      |> Map.put(:id, Ecto.UUID.generate())
+      |> Map.put(:timestamp, Interaction.now())
+      |> then(&struct!(AgentResponse, &1))
+    end
+
+    @doc "Build a `%TurnStarted{}` struct."
+    def turn_started(user_message_ids) do
+      %Interaction.TurnStarted{
+        id: Ecto.UUID.generate(),
         timestamp: Interaction.now(),
-        metadata: metadata
+        user_message_ids: user_message_ids
       }
+    end
+
+    @doc "Build an `%AgentError{}` struct."
+    def agent_error(message, kind \\ "failed", retryable \\ false, category \\ "unknown") do
+      %Interaction.AgentError{
+        id: Ecto.UUID.generate(),
+        timestamp: Interaction.now(),
+        error: message,
+        kind: kind,
+        retryable: retryable,
+        category: category
+      }
+    end
+
+    @doc "Build an `%AgentPaused{}` struct."
+    def agent_paused(tool_name, timeout_ms) do
+      %Interaction.AgentPaused{
+        id: Ecto.UUID.generate(),
+        timestamp: Interaction.now(),
+        reason: "Tool #{tool_name} timed out after #{timeout_ms}ms (on_timeout: :pause_agent)",
+        tool_name: tool_name,
+        timeout_ms: timeout_ms
+      }
+    end
+
+    @doc "Build an `%AgentCompleted{}` struct."
+    def agent_completed do
+      %Interaction.AgentCompleted{id: Ecto.UUID.generate(), timestamp: Interaction.now()}
     end
 
     @doc "Build a `%ToolCall{}` struct."
     def tool_call(call_id, name, args \\ %{}) do
       %ToolCall{
-        id: Interaction.new_id(),
+        id: Ecto.UUID.generate(),
         tool_call_id: call_id,
         tool_name: name,
         arguments: args,
@@ -212,7 +247,7 @@ defmodule FrontmanServer.InteractionCase do
     @doc "Build a `%ToolResult{}` struct."
     def tool_result(call_id, name, result, opts \\ []) do
       %ToolResult{
-        id: Interaction.new_id(),
+        id: Ecto.UUID.generate(),
         tool_call_id: call_id,
         tool_name: name,
         result: result,
@@ -234,9 +269,38 @@ defmodule FrontmanServer.InteractionCase do
       }
     end
 
+    @doc "Wrap an interaction struct like Tasks PubSub broadcasts do."
+    def interaction_event(interaction, turn_number) do
+      {:interaction, interaction_row(interaction, turn_number)}
+    end
+
+    @doc "Build an `%InteractionSchema{}` row wrapper for interaction tests."
+    def interaction_row(interaction, turn_number) do
+      schema = Module.concat([FrontmanServer, Tasks, InteractionSchema])
+
+      struct!(schema, %{
+        type:
+          PolymorphicEmbed.get_polymorphic_type(
+            schema,
+            :data,
+            interaction
+          ),
+        data: interaction,
+        turn_number: turn_number
+      })
+    end
+
     # -------------------------------------------------------------------
     # Assertion / extraction helpers
     # -------------------------------------------------------------------
+
+    defmacro assert_receive_interaction(data_pattern, turn_pattern, timeout \\ 5_000) do
+      quote do
+        assert_receive {:interaction,
+                        %{data: unquote(data_pattern), turn_number: unquote(turn_pattern)}},
+                       unquote(timeout)
+      end
+    end
 
     @doc "Extract text content from an LLM message (handles string + ContentPart list)."
     def extract_text(msg) do

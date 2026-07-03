@@ -14,10 +14,10 @@ defmodule FrontmanServer.Tasks.InteractionTest do
   alias ModelContextProtocol, as: MCP
 
   # ---------------------------------------------------------------------------
-  # UserMessage.build/1
+  # UserMessage.attrs/1
   # ---------------------------------------------------------------------------
 
-  describe "UserMessage.build/1" do
+  describe "UserMessage.attrs/1" do
     test "extracts non-empty text messages" do
       msg = build_user_message([text_block("Hello")])
 
@@ -40,15 +40,15 @@ defmodule FrontmanServer.Tasks.InteractionTest do
     test "returns error for text blocks without non-empty string text" do
       assert {:error,
               {:invalid_content_block, "text content block must include non-empty string text"}} =
-               UserMessage.build([%{"type" => "text"}])
+               UserMessage.attrs([%{"type" => "text"}])
 
       assert {:error,
               {:invalid_content_block, "text content block must include non-empty string text"}} =
-               UserMessage.build([%{"type" => "text", "text" => ""}])
+               UserMessage.attrs([%{"type" => "text", "text" => ""}])
 
       assert {:error,
               {:invalid_content_block, "text content block must include non-empty string text"}} =
-               UserMessage.build([%{"type" => "text", "text" => 1}])
+               UserMessage.attrs([%{"type" => "text", "text" => 1}])
     end
 
     test "extracts annotation from resource block" do
@@ -182,8 +182,6 @@ defmodule FrontmanServer.Tasks.InteractionTest do
         ])
 
       assert msg.current_page.device_pixel_ratio == 1.0
-
-      assert %{current_page: %{device_pixel_ratio: 1.0}} = Interaction.to_data_map(msg)
     end
 
     test "ignores resource url meta without current page marker" do
@@ -586,8 +584,8 @@ defmodule FrontmanServer.Tasks.InteractionTest do
     end
   end
 
-  describe "InteractionSchema.to_struct/1" do
-    test "returns typed embedded interaction data" do
+  describe "InteractionSchema data" do
+    test "keeps typed embedded interaction data" do
       message =
         build_user_message([
           text_block("hello"),
@@ -603,7 +601,7 @@ defmodule FrontmanServer.Tasks.InteractionTest do
       }
 
       assert %Interaction.UserMessage{current_page: %Interaction.CurrentPage{}, annotations: [_]} =
-               InteractionSchema.to_struct(row)
+               row.data
     end
   end
 
@@ -632,7 +630,7 @@ defmodule FrontmanServer.Tasks.InteractionTest do
 
       decoded = msg |> Jason.encode!() |> Jason.decode!()
 
-      assert decoded["type"] == "user_message"
+      refute Map.has_key?(decoded, "type")
       assert decoded["messages"] == ["Fix this"]
       assert [ann] = decoded["annotations"]
       assert ann["annotation_id"] == "ann-full"
@@ -662,7 +660,7 @@ defmodule FrontmanServer.Tasks.InteractionTest do
 
       decoded = tc |> Jason.encode!() |> Jason.decode!()
 
-      assert decoded["type"] == "tool_call"
+      refute Map.has_key?(decoded, "type")
       assert decoded["tool_name"] == "calculator"
       assert decoded["tool_call_id"] == "call_123"
     end
@@ -672,15 +670,15 @@ defmodule FrontmanServer.Tasks.InteractionTest do
 
       decoded = tr |> Jason.encode!() |> Jason.decode!()
 
-      assert decoded["type"] == "tool_result"
+      refute Map.has_key?(decoded, "type")
       assert decoded["result"] == MCP.tool_result_text("42")
       assert decoded["is_error"] == false
     end
   end
 
   describe "AgentPaused" do
-    test "build/2 builds struct with correct fields" do
-      interaction = Interaction.AgentPaused.build("question", 120_000)
+    test "struct has correct fields" do
+      interaction = agent_paused("question", 120_000)
 
       assert interaction.tool_name == "question"
       assert interaction.timeout_ms == 120_000
@@ -691,13 +689,16 @@ defmodule FrontmanServer.Tasks.InteractionTest do
       assert %DateTime{} = interaction.timestamp
     end
 
-    test "AgentPaused is in interaction_modules list" do
-      assert Interaction.AgentPaused in Interaction.interaction_modules()
+    test "AgentPaused is in persisted interaction types" do
+      assert Interaction.AgentPaused in Keyword.values(InteractionSchema.types())
     end
   end
 
   defp build_user_message(content_blocks) do
-    assert {:ok, message} = UserMessage.build(content_blocks)
-    message
+    assert {:ok, attrs} = UserMessage.attrs(content_blocks)
+
+    %UserMessage{}
+    |> UserMessage.changeset(attrs)
+    |> Ecto.Changeset.apply_action!(:insert)
   end
 end

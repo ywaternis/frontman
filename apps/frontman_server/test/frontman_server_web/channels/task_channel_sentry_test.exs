@@ -42,7 +42,7 @@ defmodule FrontmanServerWeb.TaskChannelSentryTest do
           is_error: true
         )
 
-      send(socket.channel_pid, {:interaction, tool_result, turn_number})
+      send(socket.channel_pid, interaction_event(tool_result, turn_number))
 
       # The client should receive "failed" not "error"
       assert_push("acp:message", %{
@@ -70,7 +70,7 @@ defmodule FrontmanServerWeb.TaskChannelSentryTest do
           MCP.tool_result_text("[]")
         )
 
-      send(socket.channel_pid, {:interaction, tool_result, turn_number})
+      send(socket.channel_pid, interaction_event(tool_result, turn_number))
 
       assert_push("acp:message", %{
         "method" => "session/update",

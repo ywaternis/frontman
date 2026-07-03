@@ -79,13 +79,11 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
 
       assert :ok = Tasks.cancel_execution(scope, task_id)
 
-      assert_receive {:interaction, %Tasks.Interaction.AgentError{kind: "cancelled"},
-                      _turn_number},
-                     5_000
+      assert_receive_interaction(%Tasks.Interaction.AgentError{kind: "cancelled"}, _turn_number)
     end
   end
 
-  # Collects all {:interaction, %ToolCall{}, turn_number} broadcasts for a specific tool call ID
+  # Collects all interaction-row broadcasts for a specific tool call ID
   defp collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms) do
     collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, [])
   end
@@ -114,12 +112,12 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
 
   defp collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, acc) do
     receive do
-      {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_tool_call_id} = tc,
-       _turn_number} ->
+      {:interaction,
+       %{data: %Tasks.Interaction.ToolCall{tool_call_id: ^expected_tool_call_id} = tc}} ->
         # Found a matching tool call broadcast, keep collecting
         collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, [tc | acc])
 
-      {:interaction, _other, _turn_number} ->
+      {:interaction, _other} ->
         # Different interaction, ignore and keep collecting
         collect_tool_call_broadcasts(expected_tool_call_id, timeout_ms, acc)
     after
@@ -163,9 +161,10 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
         submit_user_message_and_run(scope, task_id, execution_request, user_content("Call tool"))
 
       # Wait for the interaction broadcast
-      assert_receive {:interaction, %Tasks.Interaction.ToolCall{tool_call_id: ^expected_id},
-                      _turn_number},
-                     5_000
+      assert_receive_interaction(
+        %Tasks.Interaction.ToolCall{tool_call_id: ^expected_id},
+        _turn_number
+      )
 
       # At this point, agent should be registered for the tool call
       registered =
@@ -179,9 +178,7 @@ defmodule FrontmanServer.Tasks.Execution.MCPToolBroadcastTest do
 
       assert :ok = Tasks.cancel_execution(scope, task_id)
 
-      assert_receive {:interaction, %Tasks.Interaction.AgentError{kind: "cancelled"},
-                      _turn_number},
-                     5_000
+      assert_receive_interaction(%Tasks.Interaction.AgentError{kind: "cancelled"}, _turn_number)
     end
   end
 end
