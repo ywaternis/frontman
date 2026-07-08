@@ -64,5 +64,8 @@ jobs:
           set -euo pipefail
           REMOTE_DIR="/home/frs/project/${SOURCEFORGE_REPOSITORY}/${RELEASE_TAG}"
 
-          ssh "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" "mkdir -p '${REMOTE_DIR}'"
+          sftp -b - "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" <<SFTP
+          -mkdir ${REMOTE_DIR}
+          SFTP
+
           rsync -av -e ssh "sourceforge-release/" "${SOURCEFORGE_USERNAME}@frs.sourceforge.net:${REMOTE_DIR}/"
