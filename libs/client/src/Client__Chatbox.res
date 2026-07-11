@@ -110,6 +110,9 @@ let make = (~onConfigureProvider: unit => unit) => {
   let retryStatus = Client__State.useSelector(Client__State.Selectors.retryStatus)
   let configOptions = Client__State.useSelector(Client__State.Selectors.configOptions)
   let selectedModelValue = Client__State.useSelector(Client__State.Selectors.selectedModelValue)
+  let selectedReasoningValue = Client__State.useSelector(
+    Client__State.Selectors.selectedReasoningValue,
+  )
   let webPreviewIsSelecting = Client__State.useSelector(
     Client__State.Selectors.webPreviewIsSelecting,
   )
@@ -121,6 +124,11 @@ let make = (~onConfigureProvider: unit => unit) => {
     configOptions->Option.flatMap(opts =>
       FrontmanAiFrontmanProtocol.FrontmanProtocol__ACP.findConfigOptionByCategory(opts, Model)
     )
+  let reasoningConfigOption = switch (configOptions, selectedModelValue) {
+  | (Some(options), Some(modelValue)) =>
+    Client__ReasoningConfig.configOptionForModel(options, modelValue)
+  | _ => None
+  }
   let isModelsConfigLoading = configOptions->Option.isNone
 
   let (thinkingState, thinkingMessageId) = UseThinkingState.useWithMessageId(
@@ -422,9 +430,12 @@ let make = (~onConfigureProvider: unit => unit) => {
           onSubmit={handleSubmit}
           onCancel={Client__State.Actions.cancelTurn}
           modelConfigOption
+          reasoningConfigOption
           isModelsConfigLoading
           selectedModelValue
+          selectedReasoningValue
           onModelChange={value => Client__State.Actions.setSelectedModelValue(~value)}
+          onReasoningChange={value => Client__State.Actions.setSelectedReasoningValue(~value)}
           onConfigureProvider
           isAgentRunning
           hasActiveACPSession

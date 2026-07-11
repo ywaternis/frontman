@@ -133,27 +133,85 @@ defmodule AgentClientProtocol do
   This function has no knowledge of provider
   internals; all domain logic is encapsulated in the Providers context.
   """
-  def build_model_config_options(%{groups: groups}) do
-    [
-      %{
-        "type" => "select",
-        "id" => "model",
-        "name" => "Model",
-        "category" => "model",
-        "options" =>
-          Enum.map(groups, fn %{id: id, name: name, options: options} ->
-            %{
-              "group" => id,
-              "name" => name,
-              "options" =>
-                Enum.map(options, fn %{name: display_name, value: value} ->
-                  %{"value" => value, "name" => display_name}
-                end)
-            }
-          end)
-      }
-    ]
+  def build_model_config_options(%{groups: groups} = config_data) do
+    model_option = %{
+      "type" => "select",
+      "id" => "model",
+      "name" => "Model",
+      "category" => "model",
+      "options" => Enum.map(groups, &build_model_group/1)
+    }
+
+    model_option =
+      case Map.fetch(config_data, :revision) do
+        {:ok, revision} ->
+          Map.put(model_option, "_meta", %{"frontman" => %{"catalogRevision" => revision}})
+
+        :error ->
+          model_option
+      end
+
+    case reasoning_efforts(groups) do
+      [] -> [model_option]
+      efforts -> [model_option, build_thought_level_option(efforts)]
+    end
   end
+
+  defp build_model_group(%{id: id, name: name, options: options}) do
+    %{
+      "group" => id,
+      "name" => name,
+      "options" => Enum.map(options, &build_model_option/1)
+    }
+  end
+
+  defp build_model_option(%{name: display_name, value: value} = option) do
+    wire_option = %{"value" => value, "name" => display_name}
+
+    case {Map.get(option, :reasoning_efforts), Map.get(option, :default_reasoning_effort)} do
+      {efforts, default_effort} when is_list(efforts) and is_binary(default_effort) ->
+        Map.put(wire_option, "_meta", %{
+          "frontman" => %{
+            "reasoning" => %{
+              "supportedValues" => efforts,
+              "defaultValue" => default_effort
+            }
+          }
+        })
+
+      _no_reasoning ->
+        wire_option
+    end
+  end
+
+  defp reasoning_efforts(groups) do
+    canonical = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
+    supported =
+      groups
+      |> Enum.flat_map(& &1.options)
+      |> Enum.flat_map(&Map.get(&1, :reasoning_efforts, []))
+      |> MapSet.new()
+
+    Enum.filter(canonical, &MapSet.member?(supported, &1))
+  end
+
+  defp build_thought_level_option(efforts) do
+    %{
+      "type" => "select",
+      "id" => "thought_level",
+      "name" => "Reasoning",
+      "category" => "thought_level",
+      "options" => Enum.map(efforts, &%{"value" => &1, "name" => reasoning_effort_name(&1)})
+    }
+  end
+
+  defp reasoning_effort_name("none"), do: "None"
+  defp reasoning_effort_name("minimal"), do: "Minimal"
+  defp reasoning_effort_name("low"), do: "Low"
+  defp reasoning_effort_name("medium"), do: "Medium"
+  defp reasoning_effort_name("high"), do: "High"
+  defp reasoning_effort_name("xhigh"), do: "X-High"
 
   @doc """
   Builds session/new result payload with optional config options.

@@ -621,41 +621,46 @@ defmodule FrontmanServerWeb.TaskChannel do
     task_id = socket.assigns.task_id
     scope = socket.assigns.scope
 
-    case Providers.model_from_client_params(meta["model"]) do
-      {:ok, model} ->
-        Logger.info("process_prompt", %{task_id: task_id, model: model})
+    with {:ok, model} <- Providers.model_from_client_params(meta["model"]),
+         {:ok, reasoning_effort} <-
+           Providers.validate_model_reasoning(scope, model, meta["reasoning_effort"]) do
+      Logger.info("process_prompt", %{task_id: task_id, model: model})
 
-        case Tasks.submit_user_message(
-               scope,
-               %{
-                 task_id: task_id,
-                 message: content_blocks,
-                 model: model
-               }
-             ) do
-          {:ok, interaction} ->
-            push(
-              socket,
-              @acp_message,
-              ACP.build_user_message_notification(task_id, interaction.id, content_blocks)
-            )
+      case Tasks.submit_user_message(
+             scope,
+             %{
+               task_id: task_id,
+               message: content_blocks,
+               model: model,
+               reasoning_effort: reasoning_effort
+             }
+           ) do
+        {:ok, interaction} ->
+          push(
+            socket,
+            @acp_message,
+            ACP.build_user_message_notification(task_id, interaction.id, content_blocks)
+          )
 
-            wake_runner(socket, meta)
+          wake_runner(socket, meta)
 
-            Logger.info("User message accepted for task #{task_id}")
-            {:reply, {:ok, %{@acp_message => JsonRpc.success_response(id, %{})}}, socket}
+          Logger.info("User message accepted for task #{task_id}")
+          {:reply, {:ok, %{@acp_message => JsonRpc.success_response(id, %{})}}, socket}
 
-          {:error, {:invalid_content_block, message}} ->
-            Logger.error("Failed to add user message: #{message}")
-            reply_acp_error(socket, id, JsonRpc.error_invalid_params(), message)
+        {:error, {:invalid_content_block, message}} ->
+          Logger.error("Failed to add user message: #{message}")
+          reply_acp_error(socket, id, JsonRpc.error_invalid_params(), message)
 
-          {:error, reason} ->
-            Logger.error("Failed to add user message: #{inspect(reason)}")
-            reply_acp_error(socket, id, -32_000, inspect(reason))
-        end
-
+        {:error, reason} ->
+          Logger.error("Failed to add user message: #{inspect(reason)}")
+          reply_acp_error(socket, id, -32_000, inspect(reason))
+      end
+    else
       :error ->
         reply_acp_error(socket, id, JsonRpc.error_invalid_params(), "Model is required")
+
+      {:error, reason} ->
+        reply_acp_error(socket, id, JsonRpc.error_invalid_params(), inspect(reason))
     end
   end
 

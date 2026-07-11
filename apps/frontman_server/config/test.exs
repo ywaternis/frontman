@@ -70,6 +70,14 @@ config :frontman_server, FrontmanServer.Providers.AnthropicOAuth,
 config :frontman_server, FrontmanServer.Providers.OpenAIOAuth,
   req_options: [plug: {Req.Test, :openai_oauth}, retry: false]
 
+config :frontman_server, FrontmanServer.Providers.ModelCatalog, fresh_ttl_ms: -1
+
+config :frontman_server, FrontmanServer.Providers.ModelCatalog.OpenAI,
+  req_options: [plug: {Req.Test, :openai_model_catalog}, retry: false]
+
+config :frontman_server, FrontmanServer.Providers.ModelCatalog.Anthropic,
+  req_options: [plug: {Req.Test, :anthropic_model_catalog}, retry: false]
+
 # Sentry - enable test mode, disable dedup to avoid test interference
 config :sentry,
   test_mode: true,

@@ -126,6 +126,47 @@ defmodule AgentClientProtocolTest do
       assert Enum.all?(values, &String.starts_with?(&1, "anthropic:"))
     end
 
+    test "adds model reasoning metadata and a standard thought-level option" do
+      data = %{
+        groups: [
+          model_group("anthropic", "Anthropic", [
+            %{
+              name: "Claude Opus 4.6",
+              value: "anthropic:claude-opus-4-6",
+              reasoning_efforts: ["low", "high", "xhigh"],
+              default_reasoning_effort: "high"
+            }
+          ]),
+          model_group("openrouter", "OpenRouter", [
+            model_option("GPT-5.5", "openrouter:openai/gpt-5.5")
+          ])
+        ],
+        revision: 42
+      }
+
+      [model_option, thought_option] = ACP.build_model_config_options(data)
+      [anthropic_group, openrouter_group] = model_option["options"]
+      [anthropic_model] = anthropic_group["options"]
+      [openrouter_model] = openrouter_group["options"]
+
+      assert model_option["_meta"] == %{"frontman" => %{"catalogRevision" => 42}}
+
+      assert anthropic_model["_meta"] == %{
+               "frontman" => %{
+                 "reasoning" => %{
+                   "supportedValues" => ["low", "high", "xhigh"],
+                   "defaultValue" => "high"
+                 }
+               }
+             }
+
+      refute Map.has_key?(openrouter_model, "_meta")
+      assert thought_option["id"] == "thought_level"
+      assert thought_option["name"] == "Reasoning"
+      assert thought_option["category"] == "thought_level"
+      assert Enum.map(thought_option["options"], & &1["value"]) == ["low", "high", "xhigh"]
+    end
+
     test "does not set currentValue" do
       data = config_data([])
 

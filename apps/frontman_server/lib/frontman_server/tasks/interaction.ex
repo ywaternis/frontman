@@ -367,6 +367,7 @@ defmodule FrontmanServer.Tasks.Interaction do
 
     embedded_schema do
       field :model, :string
+      field :reasoning_effort, :string
       field :messages, {:array, :string}, default: []
       embeds_many :annotations, Annotation
       embeds_one :selected_figma_node, FigmaNode
@@ -377,18 +378,25 @@ defmodule FrontmanServer.Tasks.Interaction do
 
     def changeset(%__MODULE__{} = user_message, attrs) do
       user_message
-      |> Interaction.cast_timestamped(attrs, [:id, :timestamp, :model, :messages])
+      |> Interaction.cast_timestamped(attrs, [
+        :id,
+        :timestamp,
+        :model,
+        :reasoning_effort,
+        :messages
+      ])
       |> cast_embed(:annotations, with: &Annotation.changeset/2)
       |> cast_embed(:selected_figma_node, with: &FigmaNode.changeset/2)
       |> cast_embed(:images, with: &UserImage.changeset/2)
       |> cast_embed(:current_page, with: &CurrentPage.changeset/2)
     end
 
-    def attrs(content_blocks, model \\ nil) do
+    def attrs(content_blocks, model \\ nil, reasoning_effort \\ nil) do
       with {:ok, messages} <- extract_messages(content_blocks) do
         {:ok,
          %{
            model: model,
+           reasoning_effort: reasoning_effort,
            messages: messages,
            annotations: extract_annotations(content_blocks),
            selected_figma_node: extract_selected_figma_node(content_blocks),

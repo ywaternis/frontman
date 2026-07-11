@@ -158,6 +158,69 @@ defmodule FrontmanServer.Tasks.ExecutionIntegrationTest do
     on_exit(fn -> Application.put_env(:frontman_server, :backend_tools, previous) end)
   end
 
+  describe "reasoning effort (end-to-end)" do
+    setup [:setup_sandbox, :setup_user, :setup_task]
+
+    test "restores accepted turn settings instead of later toolbar settings", %{
+      task_id: task_id,
+      scope: scope
+    } do
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "anthropic", "anthropic-test-key")
+      parent = self()
+
+      expect(LLMProviderMock, :stream_text, fn model, _messages, opts ->
+        send(parent, {:accepted_settings, model, opts})
+        ReqLLMResponses.response("done")
+      end)
+
+      assert {:ok, %Interaction.UserMessage{}} =
+               Tasks.submit_user_message(scope, %{
+                 task_id: task_id,
+                 message: user_content("Think"),
+                 model: "anthropic:claude-opus-4-6",
+                 reasoning_effort: "high"
+               })
+
+      assert :ok =
+               Tasks.run_next_turn(
+                 scope,
+                 task_id,
+                 execution_request_fixture(
+                   model: "openrouter:openai/gpt-5.5",
+                   reasoning_effort: "low"
+                 )
+               )
+
+      assert_receive {:accepted_settings, model, opts}, 1_000
+      assert Providers.model_provider_name(model) == "anthropic"
+      assert opts[:reasoning_effort] == :high
+      assert_receive_interaction(%Interaction.AgentCompleted{}, 1)
+    end
+
+    test "passes the accepted reasoning effort to the LLM provider", %{
+      task_id: task_id,
+      scope: scope
+    } do
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "anthropic", "anthropic-test-key")
+      parent = self()
+
+      expect(LLMProviderMock, :stream_text, fn _model, _messages, opts ->
+        send(parent, {:llm_opts, opts})
+        ReqLLMResponses.response("done")
+      end)
+
+      assert {:ok, _, 1} =
+               submit_user_message(scope, task_id, user_content("Think"),
+                 model: "anthropic:claude-opus-4-6",
+                 reasoning_effort: "high"
+               )
+
+      assert_receive {:llm_opts, opts}, 1_000
+      assert opts[:reasoning_effort] == :high
+      assert_receive_interaction(%Interaction.AgentCompleted{}, 1)
+    end
+  end
+
   describe "cancel_execution/2 (end-to-end)" do
     setup [:setup_sandbox, :setup_user, :setup_task]
 
@@ -418,6 +481,43 @@ defmodule FrontmanServer.Tasks.ExecutionIntegrationTest do
 
   describe "append-only prompt building" do
     setup [:setup_sandbox, :setup_user, :setup_task_only]
+
+    test "resume restores the accepted model and reasoning effort", %{
+      task_id: task_id,
+      scope: scope
+    } do
+      {:ok, _api_key} = Providers.upsert_api_key(scope, "anthropic", "anthropic-test-key")
+      parent = self()
+      task = task_schema!(task_id)
+      Phoenix.PubSub.subscribe(FrontmanServer.PubSub, task_topic(task_id))
+
+      insert_accepted_user_message!(task, "included",
+        model: "anthropic:claude-opus-4-6",
+        reasoning_effort: "high"
+      )
+
+      insert_turn_started_for_messages!(task_id, 1)
+
+      expect(LLMProviderMock, :stream_text, fn model, _messages, opts ->
+        send(parent, {:resumed_settings, model, opts})
+        ReqLLMResponses.response("done")
+      end)
+
+      assert :ok =
+               Tasks.resume_execution(
+                 scope,
+                 task_id,
+                 execution_request_fixture(
+                   model: "openrouter:openai/gpt-5.5",
+                   reasoning_effort: "low"
+                 )
+               )
+
+      assert_receive {:resumed_settings, model, opts}, 1_000
+      assert Providers.model_provider_name(model) == "anthropic"
+      assert opts[:reasoning_effort] == :high
+      assert_receive_interaction(%Interaction.AgentCompleted{}, 1)
+    end
 
     test "excludes accepted messages not claimed by the started turn", %{
       task_id: task_id,
@@ -1096,8 +1196,10 @@ defmodule FrontmanServer.Tasks.ExecutionIntegrationTest do
 
   defp task_schema!(task_id), do: Repo.get!(FrontmanServer.Tasks.TaskSchema, task_id)
 
-  defp insert_accepted_user_message!(task, text) do
-    {:ok, attrs} = Interaction.UserMessage.attrs(user_content(text), "openrouter:openai/gpt-5.5")
+  defp insert_accepted_user_message!(task, text, opts \\ []) do
+    model = Keyword.get(opts, :model, "openrouter:openai/gpt-5.5")
+    reasoning_effort = Keyword.get(opts, :reasoning_effort)
+    {:ok, attrs} = Interaction.UserMessage.attrs(user_content(text), model, reasoning_effort)
 
     InteractionSchema.create_changeset(task.id, :user_message, attrs, nil)
     |> Repo.insert!()
