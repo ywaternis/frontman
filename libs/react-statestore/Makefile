@@ -8,35 +8,35 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Install project dependencies
-	yarn
+	pnpm install
 
 test: build ## Run test suite
-	yarn vitest run
+	pnpm exec vitest run
 
 test-watch: build ## Run tests in watch mode
-	yarn vitest
+	pnpm exec vitest
 
 test-coverage: build ## Run tests with coverage
-	yarn vitest run --coverage
+	pnpm exec vitest run --coverage
 
 lint: ## Run linters and code formatters
-	yarn rescript format --check
+	pnpm exec rescript format --check
 
 dev: clean ## Start development server with build watch
-	yarn rescript watch
+	pnpm exec rescript watch
 
 build: clean ## Build the project for production
-	yarn rescript build
+	pnpm exec rescript build
 
 clean: ## Clean build artifacts and temporary files
-	yarn rescript clean
+	pnpm exec rescript clean
 
 check: lint test ## Run all checks (lint + test)
 
 publish: build ## Build and publish to npm (pass OTP=<code> for 2FA)
 	@PKG=$$(node -e "const p=require('./package.json'); console.log(p.name+'@'+p.version)"); \
-	if npm view "$$PKG" version >/dev/null 2>&1; then \
+	if pnpm view "$$PKG" version >/dev/null 2>&1; then \
 		echo "Skipping $$PKG — already published"; \
 		exit 0; \
 	fi; \
-	npm publish $(if $(OTP),--otp=$(OTP))
+	pnpm publish $(if $(OTP),--otp=$(OTP))

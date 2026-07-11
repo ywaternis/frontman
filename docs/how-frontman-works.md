@@ -367,7 +367,7 @@ The browser acts as a bridge — it receives the MCP tool call, forwards it to y
 
 ### Monorepo Layout
 
-18 Yarn workspaces across ReScript, Elixir, and Node.js:
+pnpm workspaces across ReScript, Elixir, and Node.js:
 
 | Directory | Contents |
 |-----------|----------|

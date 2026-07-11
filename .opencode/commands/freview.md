@@ -51,7 +51,7 @@ Before starting, read and internalize the project guidelines:
    - Use the issue title from GitHub as the commit summary if available.
 
 3. **Create the changeset** (required by CI):
-   - Run `yarn changeset` and create the appropriate changeset entry for the changes made.
+   - Run `pnpm exec changeset` and create the appropriate changeset entry for the changes made.
    - If unsure about the changeset scope, review the files changed and categorize appropriately.
 
 ---

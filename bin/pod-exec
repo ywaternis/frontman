@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./bin/pod-exec mix test
-#   ./bin/pod-exec yarn vitest run
+#   ./bin/pod-exec pnpm exec vitest run
 #   ./bin/pod-exec mix format --check-formatted
 #   ./bin/pod-exec make rescript-build
 
@@ -17,7 +17,7 @@ if [ $# -eq 0 ]; then
     echo ""
     echo "Examples:"
     echo "  ./bin/pod-exec mix test"
-    echo "  ./bin/pod-exec yarn vitest run"
+    echo "  ./bin/pod-exec pnpm exec vitest run"
     echo "  ./bin/pod-exec mix format --check-formatted"
     exit 1
 fi

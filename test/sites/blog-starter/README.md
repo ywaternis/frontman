@@ -56,7 +56,7 @@ npx create-next-app --example blog-starter blog-starter-app
 ```
 
 ```bash
-yarn create next-app --example blog-starter blog-starter-app
+pnpm create next-app --example blog-starter blog-starter-app
 ```
 
 ```bash

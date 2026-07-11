@@ -1,0 +1,86 @@
+packages:
+  - apps/frontman_server/assets
+  - apps/marketing
+  - libs/bindings
+  - libs/client
+  - libs/experimental-rescript-webapi
+  - libs/frontman-client
+  - libs/frontman-protocol
+  - libs/frontman-core
+  - libs/frontman-astro
+  - libs/frontman-astro-browser
+  - libs/frontman-nextjs
+  - libs/frontman-wordpress
+  - libs/frontman-vite
+  - libs/logs
+  - libs/react-statestore
+  - test/sites/blog-starter
+  - test/sites/vue-vite-app
+  - test/e2e
+  - test/e2e/fixtures/nextjs
+  - test/e2e/fixtures/astro
+  - test/e2e/fixtures/vite
+  - test/e2e/fixtures/vue-vite
+  - test/manual/vite-dashboard
+
+catalog:
+  rescript: 12.3.0
+  sury: 11.0.0-alpha.8
+  sury-ppx: 11.0.0-alpha.8
+  dotenv: 17.2.3
+  '@vitest/coverage-v8': 4.1.10
+  vite: ^8.1.4
+  vitest: 4.1.10
+  rescript-vitest: 2.1.1
+  '@rescript/webapi': '*'
+
+linkWorkspacePackages: true
+preferWorkspacePackages: true
+
+strictPeerDependencies: true
+peerDependencyRules:
+  allowedVersions:
+    'rescript-vitest>vite': ^8.0.0
+
+allowBuilds:
+  '@sentry/cli': false
+  esbuild: true
+  protobufjs: false
+  sharp: true
+  sury-ppx: true
+
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@frontman-ai/*'
+  - '@frontman/*'
+
+overrides:
+  '@sentry/nextjs': 10.56.0
+  qs: '>=6.15.2'
+  glob: '>=13.0.5'
+  yaml: '>=2.8.3'
+  esbuild: '>=0.28.1'
+  postcss: '>=8.5.10'
+  'vitest@^3.1.4': 4.1.10
+
+packageExtensions:
+  '@astrojs/language-server@*':
+    dependencies:
+      typescript: '*'
+  '@astrojs/preact@*':
+    dependencies:
+      '@babel/core': ^7.0.0
+  '@preact/preset-vite@*':
+    dependencies:
+      preact: '*'
+  '@sentry/nextjs@*':
+    dependencies:
+      '@opentelemetry/core': ^2.6.1
+      '@opentelemetry/sdk-trace-base': ^2.6.1
+    peerDependencies:
+      react: ^16.14.0 || 17.x || 18.x || 19.x
+  '@sentry/webpack-plugin@*':
+    peerDependenciesMeta:
+      webpack:
+        optional: true
+

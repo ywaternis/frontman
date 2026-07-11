@@ -52,9 +52,9 @@ source files live on the host but the toolchain runs inside a Podman container.
 
 **File operations** (read, write, search, git): Run directly on the host.
 
-**Toolchain commands** (mix, yarn, node): Prefix with `./bin/pod-exec`:
+**Toolchain commands** (mix, pnpm, node): Prefix with `./bin/pod-exec`:
 - `./bin/pod-exec mix test`
-- `./bin/pod-exec yarn vitest run`
+- `./bin/pod-exec pnpm exec vitest run`
 - `./bin/pod-exec mix format --check-formatted`
 - `./bin/pod-exec make rescript-build`
 
@@ -84,7 +84,7 @@ runs with `--network=host` and routes `{hash}.{service}.frontman.local` to
 ## Key Principles
 - ReScript codebase - functional style, Result types for errors
 - File naming: `Client__ComponentName.res` (flat folder + namespacing)
-- Task runner: Makefiles only - never yarn/npm scripts directly
+- Task runner: Makefiles only - never pnpm scripts directly
 - Test files: `*.test.res.mjs`
 - Prefer `switch` over `if/else` — use pattern matching for control flow, even for simple boolean/option checks
 
@@ -272,12 +272,12 @@ Only bypass the reducer when explicitly requested for:
 
 **All notable changes must be tracked via changesets.**
 
-When making a change that should appear in the changelog, run `yarn changeset` and follow the prompts. This creates a markdown fragment in `.changeset/` describing the change.
+When making a change that should appear in the changelog, run `pnpm exec changeset` and follow the prompts. This creates a markdown fragment in `.changeset/` describing the change.
 
 - A CI check (`changelog-check.yml`) blocks PRs that don't include a changeset or direct `CHANGELOG.md` update
 - Add the `skip-changelog` label to bypass for chore/docs-only PRs
 - Changesets accumulate silently on `main` — no auto-PR is created on merge
-- To release: run `make release` which triggers a GitHub workflow that runs `yarn changeset version`, creates a `release/vX.Y.Z` branch, and opens a PR for review
+- To release: run `make release` which triggers a GitHub workflow that runs `pnpm exec changeset version`, creates a `release/vX.Y.Z` branch, and opens a PR for review
 - When the release PR is merged, `release-tag.yml` automatically creates a git tag and GitHub Release
 - The marketing site reads `/CHANGELOG.md` at build time for the `/changelog` page — keep entries in [Keep a Changelog](https://keepachangelog.com/) format: `## [version] - YYYY-MM-DD`
 

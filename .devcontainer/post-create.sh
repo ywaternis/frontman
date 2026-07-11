@@ -73,14 +73,14 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 echo "==> Verifying tools..."
 which node && node --version
-which yarn && yarn --version
+which pnpm && pnpm --version
 which elixir && elixir --version
 
 echo "==> Installing project dependencies..."
-yarn install
+pnpm install
 
 echo "==> Building ReScript..."
-yarn rescript build
+pnpm exec rescript build
 
 echo "==> Setting up Phoenix database..."
 # Get Docker bridge gateway IP for PostgreSQL connection

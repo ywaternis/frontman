@@ -29,15 +29,15 @@ jobs:
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-berry-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-berry-${{ runner.os }}-
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
 
       - name: Validate changesets
-        run: yarn changeset status --since=origin/main
+        run: pnpm exec changeset status --since=origin/main
 
       - name: Check changesets cover all changed packages
         run: |
@@ -70,7 +70,7 @@ jobs:
             if [ "$skip" = "true" ]; then continue; fi
 
             DIR_TO_PKG["$loc"]="$name"
-          done < <(yarn workspaces list --json 2>/dev/null)
+          done < <(pnpm --recursive list --depth -1 --json 2>/dev/null | jq -c '.[]')
 
           # ── Determine which publishable packages have file changes ──
           declare -A CHANGED_PKGS
@@ -153,5 +153,5 @@ jobs:
             echo "::error::  - $pkg"
           done
           echo ""
-          echo "Run 'yarn changeset' and include these packages, or add the 'skip-changelog' label."
+          echo "Run 'pnpm exec changeset' and include these packages, or add the 'skip-changelog' label."
           exit 1

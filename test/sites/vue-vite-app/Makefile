@@ -5,19 +5,19 @@ help: ## Display available commands
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Install dependencies
-	yarn install
+	pnpm install
 
 dev: ## Start development server
-	yarn dev
+	pnpm run dev
 
 build: ## Build for production (runs vue-tsc first)
-	yarn build
+	pnpm run build
 
 preview: ## Preview production build
-	yarn preview
+	pnpm run preview
 
 type-check: ## Run vue-tsc type checking
-	yarn type-check
+	pnpm run type-check
 
 clean: ## Clean build artifacts
 	rm -rf dist node_modules/.vite

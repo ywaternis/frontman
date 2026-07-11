@@ -13,7 +13,7 @@ Before your first contribution can be merged, you must sign our [Contributor Lic
 ## Prerequisites
 
 - **Node.js** v24+
-- **Yarn 4** (via [Corepack](https://nodejs.org/api/corepack.html): `corepack enable`)
+- **pnpm 11.9** (installed by `mise install` or via [Corepack](https://nodejs.org/api/corepack.html): `corepack enable && corepack install`)
 - **Elixir** 1.19+ (only needed for the server in `apps/frontman_server/`)
 - **mkcert** (for local SSL certificates)
 
@@ -37,9 +37,9 @@ make dev
 ## Development Workflow
 
 1. **Branch from `main`** — Create a feature branch for your change.
-2. **Use `make` commands** — The task runner is Makefiles, not yarn/npm scripts. Run `make help` in any directory to see available targets.
+2. **Use `make` commands** — The task runner is Makefiles, not pnpm scripts. Run `make help` in any directory to see available targets.
 3. **Run tests** — Run `make test` in the relevant `libs/` directory before submitting a PR.
-4. **Add a changeset** — If your change is user-facing, run `yarn changeset` from the repo root and follow the prompts. A CI check will block PRs that are missing a changeset.
+4. **Add a changeset** — If your change is user-facing, run `pnpm exec changeset` from the repo root and follow the prompts. A CI check will block PRs that are missing a changeset.
 
 ## Project Structure
 
@@ -91,7 +91,7 @@ frontman/
 
 1. Fill out the PR template (description, related issues, testing checklist).
 2. Ensure CI passes — linting, type checking, and tests are run automatically.
-3. Include a changeset if the change is user-facing (`yarn changeset`).
+3. Include a changeset if the change is user-facing (`pnpm exec changeset`).
 4. A maintainer will review your PR. We aim to provide initial feedback within a few business days.
 
 ## Releasing
@@ -100,7 +100,7 @@ Frontman uses [changesets](https://github.com/changesets/changesets) for version
 
 ### 1. Add changesets during development
 
-When making user-facing changes, run `yarn changeset` from the repo root. This creates a markdown fragment in `.changeset/` describing the change and which packages are affected.
+When making user-facing changes, run `pnpm exec changeset` from the repo root. This creates a markdown fragment in `.changeset/` describing the change and which packages are affected.
 
 ### 2. Create a release PR
 
@@ -109,7 +109,7 @@ make release
 ```
 
 This triggers a GitHub Actions workflow that:
-- Runs `yarn changeset version` to bump package versions and update changelogs
+- Runs `pnpm exec changeset version` to bump package versions and update changelogs
 - Creates a `release/vX.Y.Z` branch and opens a PR
 
 Review the changelog in the PR, then merge when ready.
