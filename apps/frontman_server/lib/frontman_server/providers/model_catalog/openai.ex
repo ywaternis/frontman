@@ -135,6 +135,9 @@ defmodule FrontmanServer.Providers.ModelCatalog.OpenAI do
       %{"effort" => effort}, {:ok, normalized} when effort in @reasoning_efforts ->
         {:cont, {:ok, normalized ++ [effort]}}
 
+      %{"effort" => effort}, {:ok, normalized} when is_binary(effort) ->
+        {:cont, {:ok, normalized}}
+
       _invalid, _acc ->
         {:halt, {:error, :invalid_openai_reasoning_effort}}
     end)
@@ -160,8 +163,7 @@ defmodule FrontmanServer.Providers.ModelCatalog.OpenAI do
   end
 
   defp client_version do
-    :frontman_server
-    |> Application.spec(:vsn)
-    |> to_string()
+    config = Application.get_env(:frontman_server, __MODULE__, [])
+    Keyword.get(config, :client_version, "0.0.0")
   end
 end

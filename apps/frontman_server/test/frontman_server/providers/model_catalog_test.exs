@@ -31,7 +31,7 @@ defmodule FrontmanServer.Providers.ModelCatalogTest do
   test "lists only visible API-supported OpenAI models at GPT 5.5 or newer", %{scope: scope} do
     Req.Test.expect(:openai_model_catalog, fn conn ->
       assert conn.request_path == "/backend-api/codex/models"
-      assert conn.query_string =~ "client_version="
+      assert conn.query_string == "client_version=0.0.0"
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer openai-access-token"]
       assert Plug.Conn.get_req_header(conn, "chatgpt-account-id") == ["account-123"]
 
@@ -67,6 +67,26 @@ defmodule FrontmanServer.Providers.ModelCatalogTest do
            }
 
     assert is_integer(catalog.revision)
+  end
+
+  test "keeps OpenAI models when the provider advertises newer reasoning levels", %{scope: scope} do
+    model =
+      openai_model(
+        "gpt-5.6-sol",
+        "GPT-5.6-Sol",
+        "medium",
+        ["low", "medium", "high", "xhigh", "max", "ultra"],
+        1
+      )
+
+    Req.Test.expect(:openai_model_catalog, fn conn ->
+      Req.Test.json(conn, %{"models" => [model]})
+    end)
+
+    assert {:ok, catalog} = ModelCatalog.list(scope, "openai_codex")
+
+    assert [%{value: "openai_codex:gpt-5.6-sol", reasoning_efforts: efforts}] = catalog.models
+    assert efforts == ["low", "medium", "high", "xhigh"]
   end
 
   test "returns the last successful catalog when a refresh fails", %{scope: scope} do
