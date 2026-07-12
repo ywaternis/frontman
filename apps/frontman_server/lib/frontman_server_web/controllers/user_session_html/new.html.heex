@@ -103,6 +103,12 @@
                 required
                 class="input input-lg w-full"
               />
+              <.input
+                field={@form[:remember_me]}
+                type="checkbox"
+                label="Remember me"
+                checked={true}
+              />
               <button type="submit" id="login-submit" class="btn btn-neutral btn-lg btn-block">
                 Sign in with email
               </button>
