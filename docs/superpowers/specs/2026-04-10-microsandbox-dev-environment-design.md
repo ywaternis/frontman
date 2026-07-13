@@ -82,7 +82,7 @@ sandbox_name = frontman-<hash>
 3. Inside VM via `sb.shell()`:
    - Start Postgres service and create database user
    - Clone repo using `GITHUB_TOKEN` from env
-   - `yarn install`
+   - `pnpm install`
    - `mix deps.get`
    - `mix ecto.setup`
 4. Sandbox is idle, ready for agent exec commands

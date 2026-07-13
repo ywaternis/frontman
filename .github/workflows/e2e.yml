@@ -66,9 +66,6 @@ jobs:
       DB_NAME: frontman_server_e2e_${{ github.run_id }}
       # Cloak encryption key (same test key used in dev)
       CLOAK_KEY: "HE9hCRnQXEREL1X+1+cU4wPdVGqJMhwR05edbBBq1RY="
-      # Disable Yarn hardened mode — adds ~20s to resolution for public-PR detection.
-      # --immutable already prevents lockfile changes, so hardened mode is redundant.
-      YARN_ENABLE_HARDENED_MODE: "0"
       # OpenAI OAuth tokens for the E2E test user.
       # Backing repo secrets still use the legacy ChatGPT names; expose the new
       # OpenAI env names to the app without requiring a GitHub secrets migration.
@@ -112,12 +109,12 @@ jobs:
         run: corepack enable && corepack install
 
       # ── Caches ──────────────────────────────────────────────────────────
-      - name: Cache Yarn
+      - name: Cache pnpm
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
 
       - name: Cache Mix deps
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -138,7 +135,7 @@ jobs:
 
       # ── Install dependencies ────────────────────────────────────────────
       - name: Install Node.js dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
 
       - name: Install Elixir dependencies
         working-directory: apps/frontman_server
@@ -174,7 +171,7 @@ jobs:
       # the .res.mjs files may be missing, causing the client Vite dev
       # server to 404 on module requests.  Incremental builds are fast.
       - name: Build ReScript
-        run: yarn rescript
+        run: pnpm exec rescript
 
       # Build adapters sequentially — each `build` script runs `rescript
       # build` then `tsup`.  Sequential avoids concurrent rescript processes
@@ -182,9 +179,9 @@ jobs:
       - name: Build adapter dist packages
         if: steps.js-build-cache.outputs.cache-hit != 'true'
         run: |
-          yarn workspace @frontman-ai/nextjs build
-          yarn workspace @frontman-ai/vite build
-          yarn workspace @frontman-ai/astro build
+          pnpm --filter @frontman-ai/nextjs build
+          pnpm --filter @frontman-ai/vite build
+          pnpm --filter @frontman-ai/astro build
 
       # ── mkcert for HTTPS ────────────────────────────────────────────────
       - name: Generate mkcert certificates
@@ -210,12 +207,12 @@ jobs:
 
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install chromium --with-deps 2>&1 | tail -5
+        run: pnpm exec playwright install chromium --with-deps 2>&1 | tail -5
         working-directory: test/e2e
 
       - name: Install Playwright system dependencies
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps chromium 2>&1 | tail -5
+        run: pnpm exec playwright install-deps chromium 2>&1 | tail -5
         working-directory: test/e2e
 
       # ── Run E2E tests ───────────────────────────────────────────────────
@@ -224,9 +221,9 @@ jobs:
         run: |
           SUITE="${{ github.event.inputs.test_suite }}"
           if [ "$SUITE" = "all" ] || [ -z "$SUITE" ]; then
-            echo "cmd=npx vitest run" >> "$GITHUB_OUTPUT"
+            echo "cmd=pnpm exec vitest run" >> "$GITHUB_OUTPUT"
           else
-            echo "cmd=npx vitest run tests/${SUITE}.test.ts" >> "$GITHUB_OUTPUT"
+            echo "cmd=pnpm exec vitest run tests/${SUITE}.test.ts" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run E2E tests

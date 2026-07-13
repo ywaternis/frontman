@@ -54,6 +54,7 @@ defmodule FrontmanServer.Application do
       FrontmanServerWeb.Telemetry,
       FrontmanServer.Repo,
       FrontmanServer.Vault,
+      FrontmanServer.Providers.ModelCatalog.Cache,
       {DNSCluster, query: Application.get_env(:frontman_server, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: FrontmanServer.PubSub},
       {SwarmAi, name: FrontmanServer.AgentRuntime},

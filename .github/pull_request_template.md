@@ -9,5 +9,5 @@
 ## Checklist
 
 - [ ] Added/updated tests
-- [ ] Ran `yarn changeset` (if user-facing change)
+- [ ] Ran `pnpm exec changeset` (if user-facing change)
 - [ ] Tested locally with `make dev`

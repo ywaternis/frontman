@@ -45,9 +45,10 @@
 	"scripts": {
 		"build:rescript": "rescript build",
 		"build:bundle": "tsup",
-		"build": "yarn build:rescript && yarn build:bundle"
+		"build": "pnpm run build:rescript && pnpm run build:bundle"
 	},
 	"dependencies": {
+		"@frontman/bindings": "workspace:*",
 		"@sentry/nextjs": "^10.56.0",
 		"chrome-launcher": "^1.1.2",
 		"lighthouse": "^13.3.0"

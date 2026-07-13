@@ -218,6 +218,26 @@ defmodule FrontmanServer.Providers.PrepareApiKeyTest do
 
       expect_anthropic_refresh_success()
 
+      Req.Test.expect(:anthropic_model_catalog, fn conn ->
+        assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer fresh_access"]
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "id" => "claude-opus-4-6",
+              "display_name" => "Claude Opus 4.6",
+              "created_at" => "2026-07-01T00:00:00Z",
+              "type" => "model",
+              "capabilities" => %{
+                "effort" => %{"supported" => true, "high" => %{"supported" => true}}
+              }
+            }
+          ],
+          "has_more" => false,
+          "last_id" => "claude-opus-4-6"
+        })
+      end)
+
       config = Providers.model_config_data(scope)
 
       assert Enum.any?(config.groups, &(&1.id == "anthropic"))

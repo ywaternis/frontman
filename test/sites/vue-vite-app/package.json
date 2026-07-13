@@ -9,7 +9,7 @@
 		"type-check": "vue-tsc --build --force"
 	},
 	"dependencies": {
-		"@frontman-ai/vite": "../../../libs/frontman-vite",
+		"@frontman-ai/vite": "workspace:*",
 		"@vitejs/plugin-vue": "^6.0.7",
 		"axios": "^1.13.5",
 		"pinia": "^3.0.4",

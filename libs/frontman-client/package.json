@@ -29,10 +29,13 @@
 	],
 	"scripts": {
 		"build": "rescript build",
-		"prepublishOnly": "yarn build"
+		"prepublishOnly": "pnpm run build"
 	},
 	"dependencies": {
+		"@frontman-ai/frontman-protocol": "workspace:*",
+		"@frontman/bindings": "workspace:*",
 		"@frontman/logs": "workspace:*",
+		"@rescript/runtime": "12.3.0",
 		"@sentry/browser": "^10.55.0",
 		"phoenix": "^1.8.5"
 	},

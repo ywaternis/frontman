@@ -33,12 +33,12 @@ jobs:
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-berry-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-berry-${{ runner.os }}-
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
 
       - name: Check for pending changesets
         run: |
@@ -70,10 +70,10 @@ jobs:
       - name: Run changeset version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: yarn changeset version
+        run: pnpm exec changeset version
 
       - name: Update lockfile after version bumps
-        run: yarn install --no-immutable
+        run: pnpm install --no-frozen-lockfile
 
       - name: Update root CHANGELOG and compute version
         id: version

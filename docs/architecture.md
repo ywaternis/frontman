@@ -8,7 +8,7 @@ Frontman is a browser-based AI agent that executes LLM-driven tool calls against
 
 ## Monorepo Structure
 
-**18 Yarn workspaces.** ReScript 12, Elixir 1.19.3, Yarn 4.10.3, Node 24.
+**pnpm workspaces.** ReScript 12, Elixir 1.19.3, pnpm 11.9, Node 24.
 
 ```
 apps/
@@ -389,7 +389,7 @@ GitHub Actions workflows:
 | deploy-marketing.yml | changes to marketing/astro | Astro build → Cloudflare Pages |
 | e2e.yml | PR/push | Playwright tests across 4 framework fixtures |
 | changelog-check.yml | PR | Enforces changeset presence (bypass: `skip-changelog` label) |
-| release-pr.yml | manual (`make release`) | Runs `yarn changeset version`, creates release branch + PR |
+| release-pr.yml | manual (`make release`) | Runs `pnpm exec changeset version`, creates release branch + PR |
 | release-tag.yml | release PR merge | Creates git tag + GitHub Release |
 
 Coverage gates: 70% for JS packages, 75% for Elixir server.
@@ -408,7 +408,7 @@ Coverage gates: 70% for JS packages, 75% for Elixir server.
 
 ### Release Process
 
-1. `yarn changeset` creates `.changeset/*.md` fragment
+1. `pnpm exec changeset` creates `.changeset/*.md` fragment
 2. Fragments accumulate on main
-3. `make release` triggers workflow → `yarn changeset version` → release PR
+3. `make release` triggers workflow → `pnpm exec changeset version` → release PR
 4. PR merge → auto git tag + GitHub Release

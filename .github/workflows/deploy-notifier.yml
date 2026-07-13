@@ -50,7 +50,7 @@ jobs:
             --exclude 'deps' \
             --exclude '.worktrees' \
             --exclude '.DS_Store' \
-            --exclude '.yarn' \
+            --exclude '.pnpm-store' \
             --exclude '.env.local' \
             --exclude '.certs' \
             --exclude 'docs' \

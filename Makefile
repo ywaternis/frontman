@@ -51,7 +51,7 @@ endef
 # Usage: $(call run_e2e,test-file-or-empty)
 define run_e2e
 	@test -f test/e2e/.env || { printf "$(YELLOW)Error: test/e2e/.env not found. Copy test/e2e/.env.example and fill in values.$(RESET)\n"; exit 1; }
-	set -a && . test/e2e/.env && set +a && cd test/e2e && npx vitest run $(1)
+	set -a && . test/e2e/.env && set +a && cd test/e2e && pnpm exec vitest run $(1)
 endef
 
 .PHONY: help
@@ -112,7 +112,7 @@ dev-marketing: ## Start development server for marketing site
 
 install: ## Install dependencies
 	@printf "$(YELLOW)Installing dependencies...$(RESET)\n"
-	yarn install
+	pnpm install
 	@$(MAKE) hooks-install
 
 hooks-install: ## Install git pre-commit hooks via Lefthook
@@ -153,23 +153,23 @@ verify-toolchain-pins: ## Verify Docker Elixir image matches mise.toml
 
 build: ## Build ReScript project
 	@printf "$(YELLOW)Building ReScript project...$(RESET)\n"
-	yarn rescript
+	pnpm exec rescript
 
 rescript-watch: ## Watch and rebuild ReScript on changes
 	@printf "$(YELLOW)Starting ReScript watch mode...$(RESET)\n"
-	yarn rescript watch
+	pnpm exec rescript watch
 
 rescript-build: ## Build ReScript project (one-shot)
 	@printf "$(YELLOW)Starting ReScript build...$(RESET)\n"
-	yarn rescript build
+	pnpm exec rescript build
 
 reanalyze: ## Run ReScript dead code analysis
 	@printf "$(YELLOW)Running ReScript dead code analysis...$(RESET)\n"
-	yarn rescript-tools reanalyze
+	pnpm exec rescript-tools reanalyze
 
 clean: ## Clean ReScript build artifacts
 	@printf "$(YELLOW)Cleaning build artifacts...$(RESET)\n"
-	yarn rescript clean
+	pnpm exec rescript clean
 
 ## BUILD_END
 
@@ -468,12 +468,12 @@ release: ## Create a release PR from pending changesets
 	@CHANGESETS=$$(find .changeset -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l); \
 	if [ "$$CHANGESETS" -eq 0 ]; then \
 		printf "$(YELLOW)Error: no pending changesets found$(RESET)\n"; \
-		echo "Add changesets with 'yarn changeset' before releasing"; \
+		echo "Add changesets with 'pnpm exec changeset' before releasing"; \
 		exit 1; \
 	fi; \
 	printf "$(GREEN)Found $$CHANGESETS pending changeset(s)$(RESET)\n"
 	@printf "$(CYAN)Validating changesets...$(RESET)\n"
-	@yarn changeset status
+	@pnpm exec changeset status
 	@printf "$(YELLOW)Triggering release workflow...$(RESET)\n"
 	@gh workflow run release-pr.yml --ref main
 	@printf "$(GREEN)Release workflow triggered.$(RESET)\n"

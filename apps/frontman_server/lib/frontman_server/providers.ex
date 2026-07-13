@@ -18,9 +18,12 @@ defmodule FrontmanServer.Providers do
   alias FrontmanServer.Providers.{
     AnthropicOAuth,
     ApiKey,
+    ModelCatalog,
     OAuthToken,
     OpenAIOAuth
   }
+
+  @direct_catalog_providers ["anthropic", "openai_codex"]
 
   @providers Application.compile_env!(:frontman_server, :providers)
              |> Enum.map(fn {provider, config} -> {Atom.to_string(provider), config} end)
@@ -51,9 +54,14 @@ defmodule FrontmanServer.Providers do
     provider = model_provider_name(model)
 
     case oauth_llm_opts(provider, resolve_oauth_token(scope, provider)) do
-      {:ok, llm_opts} -> {:ok, {model, Keyword.merge(llm_opts, opts)}}
-      {:error, reason} -> {:error, reason}
-      :use_api_key -> api_key_llm_args(scope, provider, model, opts)
+      {:ok, llm_opts} ->
+        {:ok, {model_spec(scope, model), Keyword.merge(llm_opts, opts)}}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      :use_api_key ->
+        api_key_llm_args(scope, provider, model, opts)
     end
   end
 
@@ -84,7 +92,7 @@ defmodule FrontmanServer.Providers do
   defp api_key_llm_args(scope, provider, model, opts) do
     case get_api_key(scope, provider) do
       %ApiKey{key: key} when is_binary(key) and key != "" ->
-        {:ok, {model, Keyword.merge(api_key_llm_opts(provider, key), opts)}}
+        {:ok, {model_spec(scope, model), Keyword.merge(api_key_llm_opts(provider, key), opts)}}
 
       nil ->
         {:error, :no_api_key}
@@ -95,6 +103,48 @@ defmodule FrontmanServer.Providers do
     do: [api_key: key, anthropic_prompt_cache: true, anthropic_cache_messages: -1]
 
   defp api_key_llm_opts(_provider, key), do: [api_key: key]
+
+  defp model_spec(_scope, model) when model in ["openai_codex:catalog", "anthropic:catalog"],
+    do: model
+
+  defp model_spec(_scope, "openai_codex:" <> id = model) when id != "" do
+    case version_at_least?(id, ~r/^gpt-(\d+)\.(\d+)(?:$|-)/, {5, 5}) do
+      true -> %{provider: :openai_codex, id: id}
+      false -> model
+    end
+  end
+
+  defp model_spec(_scope, "anthropic:" <> id = model) when id != "" do
+    case version_at_least?(
+           id,
+           ~r/^claude-(?:opus|sonnet|haiku)-(\d+)-(\d+)(?:$|-)/,
+           {4, 6}
+         ) do
+      true ->
+        %{
+          provider: :anthropic,
+          id: id,
+          capabilities: %{
+            reasoning: %{
+              effort: %{values: ["low", "medium", "high", "max"]},
+              thinking: %{types: ["adaptive"]}
+            }
+          }
+        }
+
+      false ->
+        model
+    end
+  end
+
+  defp model_spec(_scope, model), do: model
+
+  defp version_at_least?(id, pattern, minimum) do
+    case Regex.run(pattern, id, capture: :all_but_first) do
+      [major, minor] -> {String.to_integer(major), String.to_integer(minor)} >= minimum
+      nil -> false
+    end
+  end
 
   def model_from_client_params(nil), do: :error
 
@@ -111,6 +161,19 @@ defmodule FrontmanServer.Providers do
   end
 
   def model_from_client_params(_params), do: :error
+
+  def reasoning_effort_from_client_params(nil), do: {:ok, nil}
+  def reasoning_effort_from_client_params("none"), do: {:ok, :none}
+  def reasoning_effort_from_client_params("minimal"), do: {:ok, :minimal}
+  def reasoning_effort_from_client_params("low"), do: {:ok, :low}
+  def reasoning_effort_from_client_params("medium"), do: {:ok, :medium}
+  def reasoning_effort_from_client_params("high"), do: {:ok, :high}
+  def reasoning_effort_from_client_params("xhigh"), do: {:ok, :xhigh}
+  def reasoning_effort_from_client_params(_effort), do: :error
+
+  def validate_model_reasoning(scope, model, reasoning_effort) do
+    ModelCatalog.validate_selection(scope, model, reasoning_effort)
+  end
 
   def start_anthropic_oauth do
     {verifier, challenge} = AnthropicOAuth.generate_pkce()
@@ -234,7 +297,7 @@ defmodule FrontmanServer.Providers do
   On success, broadcasts a config change notification so subscribers
   (e.g. the tasks channel) can push updated config options to the client.
   """
-  def upsert_api_key(%Scope{user: %User{} = user}, provider, key) do
+  def upsert_api_key(%Scope{user: %User{} = user} = scope, provider, key) do
     user_id = user.id
     provider = String.downcase(provider)
     # Build struct with user_id set explicitly (not via changeset for security)
@@ -247,6 +310,7 @@ defmodule FrontmanServer.Providers do
            conflict_target: [:user_id, :provider]
          ) do
       {:ok, record} ->
+        :ok = ModelCatalog.invalidate(scope, provider)
         broadcast_config_changed(user_id)
         {:ok, record}
 
@@ -304,12 +368,19 @@ defmodule FrontmanServer.Providers do
         metadata: metadata
       })
 
-    Repo.insert(
-      changeset,
-      on_conflict:
-        {:replace, [:access_token, :refresh_token, :expires_at, :metadata, :updated_at]},
-      conflict_target: [:user_id, :provider]
-    )
+    case Repo.insert(
+           changeset,
+           on_conflict:
+             {:replace, [:access_token, :refresh_token, :expires_at, :metadata, :updated_at]},
+           conflict_target: [:user_id, :provider]
+         ) do
+      {:ok, token} ->
+        :ok = ModelCatalog.invalidate(%Scope{user: user}, provider)
+        {:ok, token}
+
+      error ->
+        error
+    end
   end
 
   @doc """
@@ -389,6 +460,7 @@ defmodule FrontmanServer.Providers do
         {:error, :not_found}
 
       {_, _} ->
+        :ok = ModelCatalog.invalidate(%Scope{user: user}, provider)
         broadcast_config_changed(user_id)
         :ok
     end
@@ -453,30 +525,74 @@ defmodule FrontmanServer.Providers do
         end
       end)
 
-    provider_configs =
-      Enum.filter(@providers, fn
-        {provider, %{models: [_ | _]}} ->
-          provider in oauth_providers or provider in api_key_providers
+    connected_providers = MapSet.new(api_key_providers ++ oauth_providers)
 
-        {_provider, _config} ->
-          false
-      end)
+    dynamic_catalogs =
+      @direct_catalog_providers
+      |> Enum.filter(&MapSet.member?(connected_providers, &1))
+      |> fetch_dynamic_catalogs(scope)
 
     groups =
-      Enum.map(provider_configs, fn {provider, config} ->
+      @providers
+      |> Enum.filter(fn {provider, config} ->
+        MapSet.member?(connected_providers, provider) and config.models != []
+      end)
+      |> Enum.flat_map(&model_config_group(&1, dynamic_catalogs))
+
+    %{groups: groups, revision: System.system_time(:millisecond)}
+  end
+
+  defp model_config_group({provider, config}, dynamic_catalogs) do
+    case {provider in @direct_catalog_providers, Map.get(dynamic_catalogs, provider)} do
+      {true, %{models: models}} ->
         options =
-          config.models
-          |> Enum.map(fn {name, value, _llm_db} ->
+          Enum.map(models, fn model ->
             %{
-              name: name,
-              value: model_string(provider, value)
+              name: model.name,
+              value: model.value,
+              default_reasoning_effort: model.default_reasoning_effort,
+              reasoning_efforts: model.reasoning_efforts
             }
           end)
 
-        %{id: provider, name: config.display_name, options: options}
-      end)
+        [%{id: provider, name: config.display_name, options: options}]
 
-    %{groups: groups}
+      {true, nil} ->
+        []
+
+      {false, _catalog} ->
+        options =
+          Enum.map(config.models, fn {name, value, _llm_db} ->
+            %{name: name, value: model_string(provider, value)}
+          end)
+
+        [%{id: provider, name: config.display_name, options: options}]
+    end
+  end
+
+  defp fetch_dynamic_catalogs([], _scope), do: %{}
+
+  defp fetch_dynamic_catalogs([provider], scope) do
+    case ModelCatalog.list(scope, provider) do
+      {:ok, catalog} -> %{provider => catalog}
+      {:error, _reason} -> %{}
+    end
+  end
+
+  defp fetch_dynamic_catalogs(providers, scope) do
+    providers
+    |> Task.async_stream(
+      fn provider -> {provider, ModelCatalog.list(scope, provider)} end,
+      ordered: false,
+      timeout: 6_000,
+      on_timeout: :kill_task
+    )
+    |> Enum.flat_map(fn
+      {:ok, {provider, {:ok, catalog}}} -> [{provider, catalog}]
+      {:ok, {_provider, {:error, _reason}}} -> []
+      {:exit, _reason} -> []
+    end)
+    |> Map.new()
   end
 
   defp provider_config(provider) do

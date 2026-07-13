@@ -53,7 +53,7 @@ jobs:
             --exclude 'deps' \
             --exclude '.worktrees' \
             --exclude '.DS_Store' \
-            --exclude '.yarn' \
+            --exclude '.pnpm-store' \
             --exclude '.env.local' \
             --exclude '.certs' \
             --exclude 'docs' \
@@ -141,22 +141,22 @@ jobs:
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.yarn/berry/cache
-          key: yarn-berry-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
-          restore-keys: yarn-berry-${{ runner.os }}-
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
 
       - name: Build ReScript
-        run: yarn rescript clean && yarn rescript build
+        run: pnpm exec rescript clean && pnpm exec rescript build
 
       - name: Build client standalone bundle
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
         run: |
           cd libs/client
-          yarn vite build --config vite.config.standalone.ts
+          pnpm exec vite build --config vite.config.standalone.ts
           echo "Client bundle built:"
           ls -lh dist/
 

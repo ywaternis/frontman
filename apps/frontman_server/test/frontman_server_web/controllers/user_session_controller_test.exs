@@ -1,5 +1,5 @@
 defmodule FrontmanServerWeb.UserSessionControllerTest do
-  use FrontmanServerWeb.ConnCase, async: true
+  use FrontmanServerWeb.ConnCase, async: false
 
   import FrontmanServer.Test.Fixtures.Accounts
   alias FrontmanServer.Accounts
@@ -16,6 +16,21 @@ defmodule FrontmanServerWeb.UserSessionControllerTest do
       # OAuth-only login now - shows GitHub and Google options
       assert response =~ "Login with GitHub"
       assert response =~ "Login with Google"
+    end
+
+    test "offers persistent password login by default", %{conn: conn} do
+      previous_dev_routes = Application.get_env(:frontman_server, :dev_routes)
+      Application.put_env(:frontman_server, :dev_routes, true)
+
+      on_exit(fn ->
+        Application.put_env(:frontman_server, :dev_routes, previous_dev_routes)
+      end)
+
+      response = conn |> get(~p"/users/log-in") |> html_response(200)
+
+      assert response =~ ~s(name="user[remember_me]")
+      assert response =~ ~s(value="true" checked)
+      assert response =~ "Remember me"
     end
 
     test "stores canonical signup framework in session", %{conn: conn} do

@@ -52,13 +52,21 @@ defmodule FrontmanServer.Tasks.Execution do
           model: requested_model,
           mcp_tools: mcp_tools,
           project_traits: project_traits
-        }
+        } = execution
       )
       when is_integer(turn_number) and turn_number > 0 and is_list(mcp_tools) and
              is_list(project_traits) do
     max_tokens = Application.fetch_env!(:frontman_server, :llm_max_tokens)
+    reasoning_effort = Map.get(execution, :reasoning_effort)
 
-    case Providers.prepare_llm_args(scope, requested_model, max_tokens: max_tokens) do
+    provider_opts =
+      case Providers.reasoning_effort_from_client_params(reasoning_effort) do
+        {:ok, nil} -> [max_tokens: max_tokens]
+        {:ok, effort} -> [max_tokens: max_tokens, reasoning_effort: effort]
+        :error -> raise ArgumentError, "invalid reasoning effort: #{inspect(reasoning_effort)}"
+      end
+
+    case Providers.prepare_llm_args(scope, requested_model, provider_opts) do
       {:ok, {model_spec, llm_opts}} ->
         interaction_rows = interaction_rows(task.id, turn_number)
         backend_tool_modules = Tools.backend_tool_modules()

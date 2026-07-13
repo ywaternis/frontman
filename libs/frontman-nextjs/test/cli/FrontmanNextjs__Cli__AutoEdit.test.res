@@ -107,7 +107,7 @@ let verifyTypeScriptSyntax = async (content: string, fileName: string): result<u
   let filePath = Path.join([tempDir, fileName])
   await Fs.Promises.writeFile(filePath, content)
 
-  // Resolve esbuild from the repo root node_modules (yarn workspaces hoists it there)
+  // Resolve esbuild from the repo root node_modules
   let repoRoot = Path.join([Process.cwd(), "..", ".."])
   let esbuildPath = Path.join([repoRoot, "node_modules", ".bin", "esbuild"])
   let cmd = `${esbuildPath} ${filePath} --bundle=false --format=esm --outfile=/dev/null 2>&1`

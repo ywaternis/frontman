@@ -8,27 +8,27 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Install project dependencies
-	yarn install
+	pnpm install
 
 build: ## Build the project
-	yarn rescript build
+	pnpm exec rescript build
 dev: ## Build the project in watch mode
-	yarn rescript watch
+	pnpm exec rescript watch
 
 test: build ## Run test suite
-	yarn vitest run
+	pnpm exec vitest run
 
 test-watch: ## Run tests in watch mode
-	yarn vitest watch
+	pnpm exec vitest watch
 
 test-coverage: build ## Run tests with coverage
-	yarn vitest run --coverage
+	pnpm exec vitest run --coverage
 
 lint: ## Check code formatting
-	yarn rescript format --check
+	pnpm exec rescript format --check
 
 format: ## Format code
-	yarn rescript format
+	pnpm exec rescript format
 
 check: lint test ## Run all checks (lint + test)
 

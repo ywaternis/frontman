@@ -65,6 +65,7 @@ type action =
       configOptions: array<Client__State__Types.ACPConfig.sessionConfigOption>,
     })
   | SetSelectedModelValue({value: Client__State__Types.ACPConfig.sessionConfigValueId})
+  | SetSelectedReasoningValue({value: Client__State__Types.ACPConfig.sessionConfigValueId})
   // Anthropic OAuth actions
   | FetchAnthropicOAuthStatus
   | AnthropicOAuthStatusReceived({connected: bool, expiresAt: option<string>})
@@ -160,6 +161,7 @@ module Lens = {
 
 let getInitialUrl = Client__BrowserUrl.getInitialUrl
 let selectedModelStorageKey = "frontman:selectedModelValue"
+let selectedReasoningStorageKey = "frontman:selectedReasoningValue"
 
 let migrateOpenAIModelValue = value =>
   switch value->String.startsWith("openai:") {
@@ -184,6 +186,22 @@ let saveSelectedModelValueToStorage = (value: string): unit => {
     FrontmanBindings.LocalStorage.setItem(selectedModelStorageKey, value)
   } catch {
   | exn => Log.error(~error=JsExn.fromException(exn), "saveSelectedModelValueToStorage failed")
+  }
+}
+
+let loadSelectedReasoningValueFromStorage = (): option<string> => {
+  try {
+    FrontmanBindings.LocalStorage.getItem(selectedReasoningStorageKey)->Nullable.toOption
+  } catch {
+  | _ => None
+  }
+}
+
+let saveSelectedReasoningValueToStorage = (value: string): unit => {
+  try {
+    FrontmanBindings.LocalStorage.setItem(selectedReasoningStorageKey, value)
+  } catch {
+  | exn => Log.error(~error=JsExn.fromException(exn), "saveSelectedReasoningValueToStorage failed")
   }
 }
 
@@ -256,6 +274,8 @@ let defaultState: state = {
   openaiOAuthStatus: Client__State__Types.OpenAINotConnected,
   configOptions: None,
   selectedModelValue: loadSelectedModelValueFromStorage(),
+  selectedReasoningValue: loadSelectedReasoningValueFromStorage(),
+  latestCatalogRevision: None,
   pendingProviderAutoSelect: None,
   sessionsLoadState: Client__State__Types.SessionsNotLoaded,
   updateInfo: None,
@@ -432,6 +452,12 @@ module Selectors = {
     state.selectedModelValue
   }
 
+  let selectedReasoningValue = (state: state): option<
+    Client__State__Types.ACPConfig.sessionConfigValueId,
+  > => {
+    state.selectedReasoningValue
+  }
+
   // Get Anthropic OAuth status
   let anthropicOAuthStatus = (state: state): Client__State__Types.anthropicOAuthStatus => {
     state.anthropicOAuthStatus
@@ -544,16 +570,16 @@ let sendMessageToAPIImpl = (
     let runtimeConfig = Client__RuntimeConfig.read()
     let baseMeta = Client__RuntimeConfig.toMeta(runtimeConfig)
 
-    // Add selected model to _meta if present (as "provider:value" string)
-    let _meta = switch state.selectedModelValue {
-    | Some(modelValue) =>
-      switch baseMeta->JSON.Decode.object {
-      | Some(dict) =>
-        let newDict = dict->Dict.copy
+    let _meta = switch baseMeta->JSON.Decode.object {
+    | Some(dict) =>
+      let newDict = dict->Dict.copy
+      state.selectedModelValue->Option.forEach(modelValue =>
         newDict->Dict.set("model", JSON.Encode.string(modelValue))
-        Some(JSON.Encode.object(newDict))
-      | None => Some(baseMeta)
-      }
+      )
+      state.selectedReasoningValue->Option.forEach(reasoningValue =>
+        newDict->Dict.set("reasoning_effort", JSON.Encode.string(reasoningValue))
+      )
+      Some(JSON.Encode.object(newDict))
     | None => Some(baseMeta)
     }
 
@@ -1327,8 +1353,14 @@ let next = (state: state, action) => {
 
   // ACP session config option actions
   | ConfigOptionsReceived({configOptions}) =>
-    let modelConfigOption =
-      ACP.findConfigOptionByCategory(configOptions, ACP.Model)->Option.getOrThrow(
+    let catalogRevision = Client__ReasoningConfig.catalogRevision(configOptions)
+
+    switch (state.latestCatalogRevision, catalogRevision) {
+    | (Some(latestRevision), Some(incomingRevision)) if incomingRevision < latestRevision =>
+      state->StateReducer.update
+    | _ =>
+      let modelConfigOption =
+        ACP.findConfigOptionByCategory(configOptions, ACP.Model)->Option.getOrThrow(
         ~message="ConfigOptionsReceived missing model config option",
       )
 
@@ -1342,8 +1374,16 @@ let next = (state: state, action) => {
       failwith("Model config option must use grouped options")
     }
 
+    let modelValueAvailable = value =>
+      switch modelConfigOption {
+      | ACP.SelectConfigOption({options: ACP.Grouped(groups)}) =>
+        groups->Array.some(group => group.options->Array.some(option => option.value == value))
+      | ACP.SelectConfigOption({options: ACP.Ungrouped(_)}) =>
+        failwith("Model config option must use grouped options")
+      }
+
     // When a provider was just connected, auto-select its first model.
-    // Otherwise keep the current selection or choose the first listed model.
+    // Otherwise keep an available current selection or choose the first listed model.
     let (selectedModelValue, didAutoSelect) = switch state.pendingProviderAutoSelect {
     | Some(providerId) =>
       // Find the first model value from the newly connected provider's group
@@ -1358,12 +1398,16 @@ let next = (state: state, action) => {
       }
       switch providerModelValue {
       | Some(value) => (Some(value), true)
-      | None => (state.selectedModelValue, false)
+      | None =>
+        switch state.selectedModelValue {
+        | Some(value) if modelValueAvailable(value) => (Some(value), false)
+        | _ => (firstModelValue, firstModelValue->Option.isSome)
+        }
       }
     | None =>
       switch state.selectedModelValue {
-      | Some(value) => (Some(value), false)
-      | None => (firstModelValue, firstModelValue->Option.isSome)
+      | Some(value) if modelValueAvailable(value) => (Some(value), false)
+      | _ => (firstModelValue, firstModelValue->Option.isSome)
       }
     }
     // Persist whenever we picked a new model
@@ -1371,16 +1415,57 @@ let next = (state: state, action) => {
     | (true, Some(value)) => saveSelectedModelValueToStorage(value)
     | _ => ()
     }
+    let selectedReasoningValue = selectedModelValue->Option.flatMap(modelValue =>
+      Client__ReasoningConfig.reconcile(
+        ~configOptions,
+        ~modelValue,
+        ~currentValue=state.selectedReasoningValue,
+      )
+    )
+    selectedReasoningValue->Option.forEach(saveSelectedReasoningValueToStorage)
     {
       ...state,
       configOptions: Some(configOptions),
       selectedModelValue,
+      selectedReasoningValue,
+      latestCatalogRevision: switch catalogRevision {
+      | Some(revision) => Some(revision)
+      | None => state.latestCatalogRevision
+      },
       pendingProviderAutoSelect: None,
     }->StateReducer.update
+    }
 
   | SetSelectedModelValue({value}) =>
     saveSelectedModelValueToStorage(value)
-    {...state, selectedModelValue: Some(value)}->StateReducer.update
+    let selectedReasoningValue = switch state.configOptions {
+    | Some(configOptions) =>
+      Client__ReasoningConfig.reconcile(
+        ~configOptions,
+        ~modelValue=value,
+        ~currentValue=state.selectedReasoningValue,
+      )
+    | None => None
+    }
+    selectedReasoningValue->Option.forEach(saveSelectedReasoningValueToStorage)
+    {...state, selectedModelValue: Some(value), selectedReasoningValue}->StateReducer.update
+
+  | SetSelectedReasoningValue({value}) =>
+    let configOptions = state.configOptions->Option.getOrThrow(
+      ~message="Cannot select reasoning before config options are loaded",
+    )
+    let modelValue = state.selectedModelValue->Option.getOrThrow(
+      ~message="Cannot select reasoning without a model",
+    )
+    let reasoning = Client__ReasoningConfig.forModel(configOptions, modelValue)->Option.getOrThrow(
+      ~message="Selected model does not support reasoning",
+    )
+    switch reasoning.supportedValues->Array.includes(value) {
+    | true =>
+      saveSelectedReasoningValueToStorage(value)
+      {...state, selectedReasoningValue: Some(value)}->StateReducer.update
+    | false => failwith("Selected reasoning effort is unsupported by the model")
+    }
 
   // Anthropic OAuth actions
   | FetchAnthropicOAuthStatus =>

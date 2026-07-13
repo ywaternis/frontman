@@ -18,8 +18,18 @@ let _dummyDeleteSession: Types.deleteSessionFn = (_, ~onComplete as _) => ()
 
 let _apiBaseUrl = "http://localhost:4000"
 
+type browserWindow
+
+@val external _browserWindow: browserWindow = "window"
+@set external _setRuntimeConfig: (browserWindow, JSON.t) => unit = "__frontmanRuntime"
+
 // Helper: base state with an active ACP session (needed to emit effects)
-let _makeState = (~selectedModelValue=None, ~pendingProviderAutoSelect=None): Types.state => {
+let _makeState = (
+  ~selectedModelValue=None,
+  ~selectedReasoningValue=None,
+  ~latestCatalogRevision=None,
+  ~pendingProviderAutoSelect=None,
+): Types.state => {
   {
     tasks: Dict.make(),
     currentTask: Types.Task.New(Types.Task.makeNew(~previewUrl="http://localhost:3000")),
@@ -44,6 +54,8 @@ let _makeState = (~selectedModelValue=None, ~pendingProviderAutoSelect=None): Ty
     openaiOAuthStatus: Types.OpenAINotConnected,
     configOptions: None,
     selectedModelValue,
+    selectedReasoningValue,
+    latestCatalogRevision,
     pendingProviderAutoSelect,
     sessionsLoadState: Types.SessionsNotLoaded,
     updateInfo: None,
@@ -146,6 +158,59 @@ module SampleConfig = {
   let configWithFireworksOnly = [_makeModelConfigOption(~groups=[_fireworksGroup])]
 
   let configWithNoModels = [_makeModelConfigOption(~groups=[])]
+
+  let reasoningConfig = [
+    _makeModelConfigOption(~groups=[
+      {
+        group: "anthropic",
+        name: "Anthropic",
+        options: [
+          {
+            value: "anthropic:claude-opus-4-6",
+            name: "Claude Opus 4.6",
+            description: None,
+            _meta: Some(
+              JSON.parseOrThrow(
+                `{"frontman":{"reasoning":{"supportedValues":["low","high"],"defaultValue":"high"}}}`,
+              ),
+            ),
+          },
+          {
+            value: "anthropic:claude-sonnet-4-7",
+            name: "Claude Sonnet 4.7",
+            description: None,
+            _meta: Some(
+              JSON.parseOrThrow(
+                `{"frontman":{"reasoning":{"supportedValues":["low","medium"],"defaultValue":"medium"}}}`,
+              ),
+            ),
+          },
+        ],
+        _meta: None,
+      },
+    ]),
+    ACP.SelectConfigOption({
+      id: "thought_level",
+      name: "Reasoning",
+      description: None,
+      category: Some(ACP.ThoughtLevel),
+      options: ACP.Ungrouped([
+        {value: "low", name: "Low", description: None, _meta: None},
+        {value: "medium", name: "Medium", description: None, _meta: None},
+        {value: "high", name: "High", description: None, _meta: None},
+      ]),
+      _meta: None,
+    }),
+  ]
+
+  let withRevision = (configOptions, revision) =>
+    configOptions->Array.mapWithIndex((option, index) =>
+      switch (index, option) {
+      | (0, ACP.SelectConfigOption(config)) =>
+        ACP.SelectConfigOption({...config, _meta: Some(revision->JSON.parseOrThrow)})
+      | _ => option
+      }
+    )
 }
 
 describe("Initiating actions set pendingProviderAutoSelect eagerly", () => {
@@ -185,6 +250,155 @@ describe("Initiating actions set pendingProviderAutoSelect eagerly", () => {
         t->expect(nextState.pendingProviderAutoSelect)->Expect.toEqual(Some(expectedProviderId))
       },
     )
+  })
+})
+
+describe("Reasoning selection", () => {
+  test("prompt metadata snapshots the selected model and reasoning effort", t => {
+    _setRuntimeConfig(_browserWindow, JSON.parseOrThrow(`{"framework":"nextjs"}`))
+    let capturedMeta: ref<option<JSON.t>> = ref(None)
+    let state = {
+      ..._makeState(
+        ~selectedModelValue=Some("anthropic:claude-opus-4-6"),
+        ~selectedReasoningValue=Some("high"),
+      ),
+      acpSession: AcpSessionActive({
+        sendPrompt: (_, ~additionalBlocks as _, ~onComplete as _, ~_meta) =>
+          capturedMeta.contents = _meta,
+        cancelPrompt: _dummyCancelPrompt,
+        retryTurn: _dummyRetryTurn,
+        loadTask: _dummyLoadTask,
+        deleteSession: _dummyDeleteSession,
+        apiBaseUrl: _apiBaseUrl,
+      }),
+    }
+
+    Reducer.sendMessageToAPIImpl(
+      state,
+      _ => (),
+      ~message="Hello",
+      ~attachments=[],
+      ~annotations=[],
+      ~taskId="task-1",
+    )
+
+    let meta = capturedMeta.contents->Option.getOrThrow->JSON.Decode.object->Option.getOrThrow
+    t->expect(meta->Dict.get("model"))->Expect.toEqual(Some(JSON.Encode.string("anthropic:claude-opus-4-6")))
+    t->expect(meta->Dict.get("reasoning_effort"))->Expect.toEqual(Some(JSON.Encode.string("high")))
+  })
+
+  test("older catalog revisions cannot replace newer reasoning configuration", t => {
+    let state = _makeState()
+    let currentConfig = SampleConfig.withRevision(
+      SampleConfig.reasoningConfig,
+      `{"frontman":{"catalogRevision":42}}`,
+    )
+    let staleConfig = SampleConfig.withRevision(
+      SampleConfig.configWithOpenRouterOnly,
+      `{"frontman":{"catalogRevision":41}}`,
+    )
+    let (currentState, _) = Reducer.next(
+      state,
+      ConfigOptionsReceived({configOptions: currentConfig}),
+    )
+    let (nextState, _) = Reducer.next(
+      currentState,
+      ConfigOptionsReceived({configOptions: staleConfig}),
+    )
+
+    t->expect(nextState.latestCatalogRevision)->Expect.toEqual(Some(42.0))
+    t
+    ->expect(nextState.selectedModelValue)
+    ->Expect.toEqual(Some("anthropic:claude-opus-4-6"))
+  })
+
+  test("derives only the selected model's advertised reasoning choices", t => {
+    let configOption = Client__ReasoningConfig.configOptionForModel(
+      SampleConfig.reasoningConfig,
+      "anthropic:claude-opus-4-6",
+    )->Option.getOrThrow
+
+    switch configOption {
+    | ACP.SelectConfigOption({category: Some(ACP.ThoughtLevel), options: ACP.Ungrouped(options)}) =>
+      t->expect(options->Array.map(option => option.value))->Expect.toEqual(["low", "high"])
+    | _ => failwith("Expected ungrouped thought-level config")
+    }
+  })
+
+  test("model changes preserve the current effort when the new model supports it", t => {
+    let state = _makeState(
+      ~selectedModelValue=Some("anthropic:claude-sonnet-4-7"),
+      ~selectedReasoningValue=Some("low"),
+    )
+    let (configuredState, _) = Reducer.next(
+      state,
+      ConfigOptionsReceived({configOptions: SampleConfig.reasoningConfig}),
+    )
+
+    let (nextState, _) = Reducer.next(
+      configuredState,
+      SetSelectedModelValue({value: "anthropic:claude-opus-4-6"}),
+    )
+
+    t->expect(nextState.selectedReasoningValue)->Expect.toEqual(Some("low"))
+  })
+
+  test("model changes use the new model default when the current effort is unsupported", t => {
+    let state = _makeState(
+      ~selectedModelValue=Some("anthropic:claude-opus-4-6"),
+      ~selectedReasoningValue=Some("high"),
+    )
+    let (configuredState, _) = Reducer.next(
+      state,
+      ConfigOptionsReceived({configOptions: SampleConfig.reasoningConfig}),
+    )
+
+    let (nextState, _) = Reducer.next(
+      configuredState,
+      SetSelectedModelValue({value: "anthropic:claude-sonnet-4-7"}),
+    )
+
+    t->expect(nextState.selectedReasoningValue)->Expect.toEqual(Some("medium"))
+  })
+
+  test("rejects an effort unsupported by the selected model", t => {
+    let state = _makeState(~selectedModelValue=Some("anthropic:claude-opus-4-6"))
+    let (configuredState, _) = Reducer.next(
+      state,
+      ConfigOptionsReceived({configOptions: SampleConfig.reasoningConfig}),
+    )
+
+    Expect.toThrow(
+      t->expect(() => Reducer.next(configuredState, SetSelectedReasoningValue({value: "medium"}))),
+    )
+  })
+
+  test("non-direct models clear reasoning selection", t => {
+    let state = _makeState(
+      ~selectedModelValue=Some("anthropic:claude-opus-4-6"),
+      ~selectedReasoningValue=Some("high"),
+    )
+    let (configuredState, _) = Reducer.next(
+      state,
+      ConfigOptionsReceived({configOptions: SampleConfig.reasoningConfig}),
+    )
+    let combinedConfig = switch (
+      SampleConfig.reasoningConfig->Array.get(1),
+      SampleConfig.configWithOpenRouterOnly->Array.get(0),
+    ) {
+    | (Some(thoughtOption), Some(openrouterOption)) => [openrouterOption, thoughtOption]
+    | _ => failwith("Missing sample config options")
+    }
+    let (refreshedState, _) = Reducer.next(
+      configuredState,
+      ConfigOptionsReceived({configOptions: combinedConfig}),
+    )
+    let (nextState, _) = Reducer.next(
+      refreshedState,
+      SetSelectedModelValue({value: "openrouter:google/gemini-3-flash-preview"}),
+    )
+
+    t->expect(nextState.selectedReasoningValue)->Expect.toEqual(None)
   })
 })
 
@@ -257,16 +471,17 @@ describe("ConfigOptionsReceived auto-selects model from newly connected provider
     t->expect(nextState.pendingProviderAutoSelect)->Expect.toEqual(None)
   })
 
-  test("keeps the current selection even when refreshed config omits it", t => {
-    let existingModel = "openrouter:google/gemini-3-flash-preview"
-    let state = _makeState(~selectedModelValue=Some(existingModel))
+  test("selects the first available model when refresh removes the current selection", t => {
+    let state = _makeState(~selectedModelValue=Some("openai_codex:gpt-5.9-removed"))
 
     let (nextState, _effects) = Reducer.next(
       state,
       ConfigOptionsReceived({configOptions: SampleConfig.configWithAnthropic}),
     )
 
-    t->expect(nextState.selectedModelValue)->Expect.toEqual(Some(existingModel))
+    t
+    ->expect(nextState.selectedModelValue)
+    ->Expect.toEqual(Some("anthropic:claude-sonnet-4-5"))
     t->expect(nextState.pendingProviderAutoSelect)->Expect.toEqual(None)
   })
 
@@ -283,11 +498,10 @@ describe("ConfigOptionsReceived auto-selects model from newly connected provider
     ->Expect.toEqual(Some("anthropic:claude-sonnet-4-5"))
   })
 
-  test("clears pendingProviderAutoSelect even when provider and current model are missing", t => {
-    let existingModel = "openai_codex:gpt-5.1-codex-max"
+  test("falls back when the pending provider and current model are missing", t => {
     let state = _makeState(
       ~pendingProviderAutoSelect=Some("openai_codex"),
-      ~selectedModelValue=Some(existingModel),
+      ~selectedModelValue=Some("openai_codex:gpt-5.1-codex-max"),
     )
 
     let (nextState, _effects) = Reducer.next(
@@ -295,7 +509,9 @@ describe("ConfigOptionsReceived auto-selects model from newly connected provider
       ConfigOptionsReceived({configOptions: SampleConfig.configWithOpenRouterOnly}),
     )
 
-    t->expect(nextState.selectedModelValue)->Expect.toEqual(Some(existingModel))
+    t
+    ->expect(nextState.selectedModelValue)
+    ->Expect.toEqual(Some("openrouter:google/gemini-3-flash-preview"))
     t->expect(nextState.pendingProviderAutoSelect)->Expect.toEqual(None)
   })
 

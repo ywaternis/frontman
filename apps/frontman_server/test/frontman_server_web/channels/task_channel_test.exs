@@ -8,13 +8,16 @@ defmodule FrontmanServerWeb.TaskChannelTest do
   import FrontmanServer.Test.Fixtures.Tasks
 
   alias AgentClientProtocol.Content.{ContentItem, TextBlock}
-  alias FrontmanServer.Tasks
+  alias FrontmanServer.{Providers, Tasks}
   alias FrontmanServer.Test.Fixtures.LLMProvider
   alias FrontmanServer.Workers.GenerateTitle
   alias FrontmanServerWeb.UserSocket
 
   alias FrontmanServer.Tasks.Interaction
   alias ModelContextProtocol, as: MCP
+
+  setup {Req.Test, :set_req_test_from_context}
+  setup {Req.Test, :verify_on_exit!}
 
   # --- Live execution chunk builders ---
 
@@ -254,6 +257,57 @@ defmodule FrontmanServerWeb.TaskChannelTest do
       })
 
       assert_state_update_idle(task_id)
+    end
+
+    test "accepts and persists a supported direct-provider reasoning effort", %{
+      socket: socket,
+      task_id: task_id,
+      scope: scope
+    } do
+      {:ok, _key} = Providers.upsert_api_key(scope, "anthropic", "anthropic-api-key")
+
+      Req.Test.expect(:anthropic_model_catalog, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "id" => "claude-opus-4-6",
+              "display_name" => "Claude Opus 4.6",
+              "created_at" => "2026-07-01T00:00:00Z",
+              "type" => "model",
+              "capabilities" => %{
+                "effort" => %{
+                  "supported" => true,
+                  "high" => %{"supported" => true}
+                }
+              }
+            }
+          ],
+          "has_more" => false,
+          "last_id" => "claude-opus-4-6"
+        })
+      end)
+
+      complete_mcp_handshake(socket)
+
+      ref =
+        push(
+          socket,
+          "acp:message",
+          build_prompt_request(
+            _meta: %{
+              "model" => "anthropic:claude-opus-4-6",
+              "reasoning_effort" => "high"
+            }
+          )
+        )
+
+      assert_reply(ref, :ok, %{"acp:message" => %{"result" => %{}}})
+      :sys.get_state(socket.channel_pid)
+
+      assert {:ok, task} = Tasks.get_task(scope, task_id)
+
+      assert %Interaction.UserMessage{reasoning_effort: "high"} =
+               Enum.find(task.interactions, &match?(%Interaction.UserMessage{}, &1))
     end
 
     test "returns invalid params for malformed text content block", %{socket: socket} do

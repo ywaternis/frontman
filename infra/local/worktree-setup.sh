@@ -32,7 +32,7 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 echo "==> Verifying tools..."
 which node && node --version
-which yarn && yarn --version
+which pnpm && pnpm --version
 which elixir && elixir --version
 
 echo "==> Generating local SSL certificates..."
@@ -49,10 +49,10 @@ fi
 
 echo "==> Installing JS dependencies..."
 cd "$WORKSPACE"
-yarn install
+pnpm install
 
 echo "==> Building ReScript..."
-yarn rescript build
+pnpm exec rescript build
 
 echo "==> Installing Elixir dependencies..."
 cd "$WORKSPACE/apps/frontman_server"

@@ -249,7 +249,7 @@ git clone https://github.com/frontman-ai/frontman.git
 cd frontman
 
 # 1. Install dependencies
-yarn install
+pnpm install
 cd apps/frontman_server
 mix deps.get
 

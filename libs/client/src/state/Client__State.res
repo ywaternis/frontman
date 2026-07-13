@@ -222,6 +222,9 @@ module Actions = {
   let setSelectedModelValue = (~value) =>
     Client__State__Store.dispatch(SetSelectedModelValue({value: value}))
 
+  let setSelectedReasoningValue = (~value) =>
+    Client__State__Store.dispatch(SetSelectedReasoningValue({value: value}))
+
   // Anthropic OAuth action creators
   let fetchAnthropicOAuthStatus = () => Client__State__Store.dispatch(FetchAnthropicOAuthStatus)
 

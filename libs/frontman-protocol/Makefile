@@ -5,10 +5,10 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 build: ## Build ReScript
-	yarn rescript build
+	pnpm exec rescript build
 
 clean: ## Clean build artifacts
-	yarn rescript clean
+	pnpm exec rescript clean
 
 export-schemas: build ## Export Sury schemas to JSON Schema files
 	node scripts/ExportSchemas.res.mjs

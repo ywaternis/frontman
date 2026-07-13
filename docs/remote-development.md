@@ -299,7 +299,7 @@ The services are routed through Caddy reverse proxy on the server, which handles
 > mkcert -key-file .certs/frontman.local-key.pem -cert-file .certs/frontman.local.pem "*.frontman.local" frontman.local localhost
 >
 > # 7. Build workspace packages
-> cd /workspaces/your-branch/libs/frontman-nextjs && yarn build && cd -
+> cd /workspaces/your-branch/libs/frontman-nextjs && pnpm run build && cd -
 >
 > # 8. Start dev servers
 > # Phoenix needs env vars exported — op isn't available in the container,
@@ -669,7 +669,7 @@ rm -rf test/sites/blog-starter/.next
 
 ### Out of Disk Space
 
-The biggest disk consumers are **GitHub Action runner writable layers** (yarn cache, mise installs, build artifacts accumulate ~5-7GB per runner per CI run) and **stale Docker build images**.
+The biggest disk consumers are **GitHub Action runner writable layers** (pnpm store, mise installs, build artifacts accumulate ~5-7GB per runner per CI run) and **stale Docker build images**.
 
 **Automated protections in place:**
 - Runner work dirs are mounted as `tmpfs` (RAM-backed) so they don't persist to the overlay filesystem

@@ -95,6 +95,20 @@ defmodule FrontmanServer.TasksTest do
   end
 
   describe "submit_user_message/2" do
+    test "persists the accepted reasoning effort with the user message", %{scope: scope} do
+      task = task_fixture(scope)
+
+      assert {:ok, %Interaction.UserMessage{reasoning_effort: "high"}} =
+               Tasks.submit_user_message(scope, %{
+                 task_id: task.id,
+                 message: user_content("hello"),
+                 model: "anthropic:claude-opus-4-6",
+                 reasoning_effort: "high"
+               })
+
+      assert [%{data: %Interaction.UserMessage{reasoning_effort: "high"}}] = db_rows(task.id)
+    end
+
     test "persists an accepted user message without starting a turn", %{scope: scope} do
       task = task_fixture(scope)
 

@@ -8,53 +8,54 @@ help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 install: ## Install project dependencies
-	npm install
+	pnpm install
 
 test: build ## Run test suite
-	yarn vitest run
+	pnpm exec vitest run
 
 test-coverage: build ## Run tests with coverage
-	yarn vitest run --coverage
+	pnpm exec vitest run --coverage
 
 lint: ## Run linters and code formatters
-	yarn biome check .
+	pnpm exec biome check .
 
 format: ## Format code with biome
-	yarn biome check --write .
+	pnpm exec biome check --write .
 
 dev: 
-	yarn vite
+	pnpm exec vite
 
 dev-build-watch: ## Watch and build in development mode
-	yarn vite build --mode development --watch
+	pnpm exec vite build --mode development --watch
 
 dev-hot: ## Start development server with hot reload
-	yarn vite --mode development
+	pnpm exec vite --mode development
 
 build: ## Build the project for production
 	$(MAKE) clean
-	yarn rescript build
+	pnpm exec rescript build
 
 build-lib: ## Build the project as a library
 	$(MAKE) clean
-	yarn vite build --mode library
+	pnpm exec rescript build
+	pnpm exec vite build --mode library
 
 build-standalone: ## Build standalone bundle (React bundled) for Cloudflare Pages
 	$(MAKE) clean
-	yarn rescript build
-	yarn vite build --config vite.config.standalone.ts
+	pnpm exec rescript build
+	pnpm exec vite build --config vite.config.standalone.ts
 
 clean: ## Clean build artifacts and temporary files
 	rm -rf dist
 
 serve: ## Serve production build
-	yarn vite preview --port 5173 --host
+	pnpm exec vite preview --port 5173 --host
 
 preview: ## Preview production build
-	yarn vite preview
+	pnpm exec vite preview
 
 publish:
 	$(MAKE) build-lib
-	npm publish
+	pnpm publish
 
 check: lint ## Run all checks (lint + test)

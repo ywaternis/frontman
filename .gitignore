@@ -20,15 +20,9 @@ node_modules/
 .env.local
 test/e2e/.env
 
-# Yarn
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-.pnp.*
-yarn-error.log
+# pnpm
+.pnpm-store/
+pnpm-debug.log*
 
 # IDE
 .vscode/

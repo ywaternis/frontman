@@ -275,23 +275,25 @@ module ModelSelector = {
   let make = (
     ~configOption: ACP.sessionConfigOption,
     ~selectedValue: string,
-    ~onModelChange: string => unit,
+    ~onValueChange: string => unit,
+    ~placeholder: string,
   ) => {
     let selectedDisplay = React.useMemo2(
       () => _getSelectedDisplay(configOption, selectedValue),
       (configOption, selectedValue),
     )
 
-    <Select value={selectedValue} onValueChange={(value, _) => onModelChange(value)}>
+    <Select value={selectedValue} onValueChange={(value, _) => onValueChange(value)}>
       <Select.Trigger
         className="inline-flex items-center gap-1 h-8 pl-2 pr-1.5 text-xs rounded-md
                    bg-transparent text-zinc-400 border-none cursor-pointer
                    hover:text-zinc-200 hover:bg-white/6
-                   focus:outline-none focus:ring-0
+                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/70
+                   focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-900
                    data-[placeholder]:text-zinc-500 [&_svg]:size-3 [&_svg]:text-zinc-400"
       >
         <span className="truncate max-w-[120px]">
-          {React.string(selectedDisplay->Option.getOr("Select model..."))}
+          {React.string(selectedDisplay->Option.getOr(placeholder))}
         </span>
       </Select.Trigger>
       <Select.Content
@@ -459,9 +461,12 @@ let make = (
   ~onSubmit: (~text: string, ~inputItems: array<inputItem>) => unit,
   ~onCancel: unit => unit,
   ~modelConfigOption: option<ACP.sessionConfigOption>,
+  ~reasoningConfigOption: option<ACP.sessionConfigOption>,
   ~isModelsConfigLoading: bool,
   ~selectedModelValue: option<ACP.sessionConfigValueId>,
+  ~selectedReasoningValue: option<ACP.sessionConfigValueId>,
   ~onModelChange: string => unit,
+  ~onReasoningChange: string => unit,
   ~onConfigureProvider: unit => unit,
   ~isAgentRunning: bool,
   ~hasActiveACPSession: bool,
@@ -964,10 +969,25 @@ let make = (
         | (false, Some(configOption)) =>
           <div className="shrink min-w-0 max-w-[160px]">
             <ModelSelector
-              configOption selectedValue={selectedModelValue->Option.getOr("")} onModelChange
+              configOption
+              selectedValue={selectedModelValue->Option.getOr("")}
+              onValueChange={onModelChange}
+              placeholder="Select model"
             />
           </div>
         | (false, None) => React.null
+        }}
+        {switch (reasoningConfigOption, selectedReasoningValue) {
+        | (Some(configOption), Some(selectedValue)) =>
+          <div className="shrink-0 max-w-[110px]">
+            <ModelSelector
+              configOption
+              selectedValue
+              onValueChange={onReasoningChange}
+              placeholder="Reasoning"
+            />
+          </div>
+        | _ => React.null
         }}
       </div>
 
