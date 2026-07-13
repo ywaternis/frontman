@@ -10,7 +10,7 @@ let visibleToAgent = true
 let description = `Checks if a file or directory exists.
 
 Parameters:
-- path (required): Path to check - either relative to source root or absolute (must be under source root)
+- path (required): Path to check, relative to source root or absolute. Parent traversal is supported.
 
 Returns true if the path exists, false otherwise.`
 

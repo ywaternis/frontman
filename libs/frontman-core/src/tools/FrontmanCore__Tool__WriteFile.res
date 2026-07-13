@@ -13,7 +13,7 @@ let visibleToAgent = true
 let description = `Writes content to a file.
 
 Parameters:
-- path (required): Path to file - either relative to source root or absolute (must be under source root)
+- path (required): Path to file, relative to source root or absolute. Parent traversal is supported.
 - content: Text content to write (mutually exclusive with image_ref)
 - image_ref: URI of a user-attached image to save (e.g., "attachment://att_abc123/photo.png"). Use this to save images the user has pasted into the chat. Mutually exclusive with content.
 - encoding: Set to "base64" when writing binary data (used internally when image_ref is resolved)

@@ -6,7 +6,7 @@
 // - Response context generation for tool outputs
 //
 // Architecture:
-// - SafePath: Low-level security (traversal prevention)
+// - SafePath: Consistent absolute path resolution
 // - PathContext: Developer experience (helpful errors, context)
 
 module SafePath = FrontmanCore__SafePath
@@ -77,22 +77,14 @@ let toRelativePath = (~sourceRoot: string, ~absolutePath: string): string => {
 // Search Path Resolution
 // ============================================
 
-// Resolve search path for commands that accept optional path parameter
-// Returns sourceRoot if no path provided, otherwise validates path is under sourceRoot
+// Resolve search paths relative to sourceRoot while allowing parent traversal.
 let resolveSearchPath = (~sourceRoot: string, ~inputPath: option<string>): string => {
   switch inputPath {
   | None => sourceRoot
   | Some(path) =>
-    if Path.isAbsolute(path) {
-      let normalizedPath = Path.normalize(path)
-      let normalizedRoot = Path.normalize(sourceRoot)
-      if normalizedPath->String.startsWith(normalizedRoot) {
-        normalizedPath
-      } else {
-        sourceRoot // Fallback to sourceRoot if outside
-      }
-    } else {
-      Path.join([sourceRoot, path])
+    switch Path.isAbsolute(path) {
+    | true => Path.normalize(path)
+    | false => Path.resolve(Path.join([sourceRoot, path]))
     }
   }
 }
@@ -152,8 +144,7 @@ let detectPathConfusion = (~sourceRoot: string, ~requestedPath: string): option<
 // Path Operations
 // ============================================
 
-// Get the parent directory of a resolved path
-// Safe because the parent of a validated path is always under sourceRoot (or equal to it)
+// Get the parent directory of a resolved path.
 let dirname = (result: resolveResult): string => {
   SafePath.dirname(result.safePath)
 }

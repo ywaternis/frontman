@@ -11,7 +11,7 @@ let visibleToAgent = false
 let description = `Discovers and loads agent instruction files (Agents.md or CLAUDE.md) following Claude Code's discovery algorithm.
 
 Parameters:
-- startPath (optional): Starting directory for discovery - must be under source root. Defaults to "." (source root).
+- startPath (optional): Starting directory for discovery, relative to source root or absolute. Defaults to ".".
 
 Discovery:
 - Walks up from startPath to filesystem root
@@ -121,7 +121,6 @@ let rec walkUpDirectories = async (current: string, acc: array<instructionFile>)
 }
 
 let execute = async (ctx: Tool.serverExecutionContext, input: input): Tool.MCP.CallToolResult.t => {
-  // Validate startPath is under sourceRoot (prevents starting from arbitrary locations)
   let inputPath = input.startPath->Option.getOr(".")
 
   switch SafePath.resolve(~sourceRoot=ctx.sourceRoot, ~inputPath) {

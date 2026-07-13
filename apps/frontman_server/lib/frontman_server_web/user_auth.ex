@@ -353,14 +353,17 @@ defmodule FrontmanServerWeb.UserAuth do
   redirects to that URL instead of the default signed-in path.
   """
   def redirect_if_user_is_authenticated(conn, _opts) do
-    if conn.assigns.current_scope do
-      return_to = conn.params["return_to"]
+    case {conn.assigns.current_scope, get_session(conn, :user_return_to)} do
+      {%Scope{}, nil} ->
+        conn
+        |> redirect_to_return_path(conn.params["return_to"])
+        |> halt()
 
-      conn
-      |> redirect_to_return_path(return_to)
-      |> halt()
-    else
-      conn
+      {%Scope{}, return_to} when is_binary(return_to) ->
+        conn
+
+      {nil, _return_to} ->
+        conn
     end
   end
 

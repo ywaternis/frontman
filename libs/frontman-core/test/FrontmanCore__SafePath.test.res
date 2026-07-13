@@ -33,11 +33,11 @@ describe("resolve", () => {
     }
   })
 
-  test("rejects path escaping sourceRoot via ..", t => {
-    let result = SafePath.resolve(~sourceRoot="/project", ~inputPath="../../etc/passwd")
+  test("resolves parent traversal above sourceRoot", t => {
+    let result = SafePath.resolve(~sourceRoot="/project/app/src", ~inputPath="..")
     switch result {
-    | Ok(_) => t->expect("should have failed")->Expect.toBe("")
-    | Error(_) => t->expect(true)->Expect.toBe(true)
+    | Ok(safePath) => t->expect(SafePath.toString(safePath))->Expect.toBe("/project/app")
+    | Error(msg) => t->expect(msg)->Expect.toBe("should not fail")
     }
   })
 
@@ -49,11 +49,11 @@ describe("resolve", () => {
     }
   })
 
-  test("rejects absolute path outside sourceRoot", t => {
+  test("accepts absolute path outside sourceRoot", t => {
     let result = SafePath.resolve(~sourceRoot="/project", ~inputPath="/etc/passwd")
     switch result {
-    | Ok(_) => t->expect("should have failed")->Expect.toBe("")
-    | Error(_) => t->expect(true)->Expect.toBe(true)
+    | Ok(safePath) => t->expect(SafePath.toString(safePath))->Expect.toBe("/etc/passwd")
+    | Error(msg) => t->expect(msg)->Expect.toBe("should not fail")
     }
   })
 
@@ -81,35 +81,14 @@ describe("resolve", () => {
 })
 
 // ============================================
-// resolve — separator handling (Issue #432)
-// On macOS/Linux, Path.normalize uses /
-// These tests verify the logic is correct with forward slashes;
-// on Windows, the same code uses Path.sep (\) to append separators.
+// resolve — absolute paths
 // ============================================
-describe("resolve - separator handling", () => {
-  test("sourceRoot at path boundary is enforced (no prefix collision)", t => {
-    // /project-extra should NOT be accepted under /project
-    let result = SafePath.resolve(~sourceRoot="/project", ~inputPath="/project-extra/file.ts")
-    switch result {
-    | Ok(_) => t->expect("should have rejected path prefix collision")->Expect.toBe("")
-    | Error(_) => t->expect(true)->Expect.toBe(true)
-    }
-  })
-
+describe("resolve - absolute paths", () => {
   test("accepts sourceRoot itself as absolute input", t => {
     let result = SafePath.resolve(~sourceRoot="/project", ~inputPath="/project")
     switch result {
     | Ok(safePath) => t->expect(SafePath.toString(safePath))->Expect.toBe("/project")
     | Error(msg) => t->expect(msg)->Expect.toBe("should not fail")
-    }
-  })
-
-  test("nested sourceRoot with similar prefix is safe", t => {
-    // /a/bc should not match /a/b as sourceRoot
-    let result = SafePath.resolve(~sourceRoot="/a/b", ~inputPath="/a/bc/file.ts")
-    switch result {
-    | Ok(_) => t->expect("should have rejected similar prefix")->Expect.toBe("")
-    | Error(_) => t->expect(true)->Expect.toBe(true)
     }
   })
 })
@@ -141,12 +120,12 @@ describe("join", () => {
     }
   })
 
-  test("rejects join that escapes sourceRoot", t => {
+  test("joins segments above sourceRoot", t => {
     switch SafePath.resolve(~sourceRoot="/project", ~inputPath="src") {
     | Ok(safePath) =>
       switch SafePath.join(~sourceRoot="/project", safePath, ["..", "..", "etc"]) {
-      | Ok(_) => t->expect("should have failed")->Expect.toBe("")
-      | Error(_) => t->expect(true)->Expect.toBe(true)
+      | Ok(joined) => t->expect(SafePath.toString(joined))->Expect.toBe("/etc")
+      | Error(msg) => t->expect(msg)->Expect.toBe("should not fail")
       }
     | Error(msg) => t->expect(msg)->Expect.toBe("should not fail")
     }

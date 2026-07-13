@@ -340,6 +340,20 @@ defmodule FrontmanServerWeb.UserAuthTest do
       assert redirected_to(conn) == ~p"/"
     end
 
+    test "allows an authenticated user to re-authenticate for a stored return path", %{
+      conn: conn,
+      user: user
+    } do
+      conn =
+        conn
+        |> assign(:current_scope, Scope.for_user(user))
+        |> put_session(:user_return_to, ~p"/users/settings")
+        |> UserAuth.redirect_if_user_is_authenticated([])
+
+      refute conn.halted
+      refute conn.status
+    end
+
     test "does not redirect if user is not authenticated", %{conn: conn} do
       conn = UserAuth.redirect_if_user_is_authenticated(conn, [])
       refute conn.halted

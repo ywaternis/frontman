@@ -171,7 +171,7 @@ describe("Tool path guardrails", _t => {
     t->expect(anchors->Array.includes(expectedFile->Path.dirname))->Expect.toBe(true)
   })
 
-  testAsync("T6 read_file-style recovery stays in source root", async t => {
+  testAsync("T6 read_file-style recovery can traverse above source root", async t => {
     ToolPathHints.clear()
     let dir = await makeFixture()
 
@@ -184,8 +184,8 @@ describe("Tool path guardrails", _t => {
     switch outsideCandidate {
     | None => failwith("Expected recovery result")
     | Some(recovery) => {
-        t->expect(recovery.nearestDir)->Expect.toBe(dir)
-        t->expect(recovery.nearestDirRelative)->Expect.toBe("")
+        t->expect(recovery.nearestDir)->Expect.toBe(Path.dirname(dir))
+        t->expect(recovery.nearestDirRelative)->Expect.toBe(Path.dirname(dir))
       }
     }
 

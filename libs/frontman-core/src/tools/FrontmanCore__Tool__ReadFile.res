@@ -16,7 +16,7 @@ let visibleToAgent = true
 let description = `Reads a file from the filesystem.
 
 Parameters:
-- path (required): Path to file - either relative to source root or absolute (must be under source root)
+- path (required): Path to file, relative to source root or absolute. Parent traversal is supported.
 - offset (optional): Line number to start from (0-indexed, default: 0). Pass null or 0 to start from beginning.
 - limit (optional): Maximum lines to read (default: 500). Pass null or 500 for default.
 

@@ -21,7 +21,7 @@ let visibleToAgent = true
 let description = `Edits a file by replacing text using fuzzy matching.
 
 Parameters:
-- path (required): Path to file - either relative to source root or absolute (must be under source root)
+- path (required): Path to file, relative to source root or absolute. Parent traversal is supported.
 - oldText (required): The text to find and replace. An empty oldText creates a new file with newText as content.
 - newText (required): The replacement text (must differ from oldText)
 - replaceAll (optional): If true, replaces all occurrences. Default: false.
