@@ -10,6 +10,7 @@ let () = if typeof(packageVersion) == #undefined {
 
 module Bindings = FrontmanBindings
 module Hosts = FrontmanAiFrontmanCore.FrontmanCore__Hosts
+module RepositoryRoot = FrontmanAiFrontmanCore.FrontmanCore__RepositoryRoot
 
 // Default host can be overridden via FRONTMAN_HOST env var for development
 let defaultHost = switch Bindings.Process.env->Dict.get("FRONTMAN_HOST") {
@@ -48,7 +49,7 @@ type t = {
   isDev: bool,
   projectRoot: string,
   // sourceRoot: root for resolving file paths
-  // In a monorepo, this is typically the monorepo root. Defaults to projectRoot.
+  // Defaults to the repository containing projectRoot, or projectRoot outside a repository.
   sourceRoot: string,
   basePath: string,
   serverName: string,
@@ -92,7 +93,7 @@ let makeFromObject = (config: jsConfigInput): t => {
     )
     ->Option.getOr(".")
 
-  let sourceRoot = config.sourceRoot->Option.getOr(projectRoot)
+  let sourceRoot = config.sourceRoot->Option.getOr(RepositoryRoot.resolve(projectRoot))
   let basePath = config.basePath->Option.getOr("frontman")
   let serverName = config.serverName->Option.getOr("frontman-vite")
   let serverVersion = config.serverVersion->Option.getOr(packageVersion)

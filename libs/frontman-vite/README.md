@@ -73,7 +73,7 @@ frontmanPlugin({
   basePath: 'frontman',            // Base path for Frontman routes (default: "frontman")
   isDev: false,                    // Dev mode (default: inferred from host — true unless host is "api.frontman.sh")
   projectRoot: '.',                // Project root directory (default: env PROJECT_ROOT or cwd)
-  sourceRoot: '.',                 // Source root for resolving file paths (default: projectRoot)
+  sourceRoot: '.',                 // File access root (default: enclosing repository root)
   clientUrl: 'https://...',        // Custom client bundle URL (default: inferred from isDev)
   clientCssUrl: 'https://...',     // Custom client CSS URL (default: inferred from isDev)
   entrypointUrl: 'http://...',     // Custom entrypoint URL for the API

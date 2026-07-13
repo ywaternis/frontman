@@ -11,11 +11,12 @@ let () = if typeof(packageVersion) == #undefined {
 
 module Core = FrontmanAiFrontmanCore
 module CoreRequestHandlers = Core.FrontmanCore__RequestHandlers
+module RepositoryRoot = Core.FrontmanCore__RepositoryRoot
 module ToolRegistry = FrontmanNextjs__ToolRegistry
 
 type config = {
   projectRoot: string,
-  // sourceRoot: root for file paths (monorepo root in monorepo setups, same as projectRoot otherwise)
+  // sourceRoot: root for file paths (repository root by default)
   sourceRoot: string,
   serverName: string,
   serverVersion: string,
@@ -33,7 +34,9 @@ let make = (
   ~serverName="frontman-nextjs",
   ~serverVersion=packageVersion,
 ): t => {
-  let resolvedSourceRoot = sourceRoot->Option.getOr(projectRoot)
+  let resolvedSourceRoot = sourceRoot->Option.getOr(
+    RepositoryRoot.resolve(projectRoot),
+  )
 
   {
     config: {

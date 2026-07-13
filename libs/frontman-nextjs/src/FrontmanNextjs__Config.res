@@ -8,6 +8,7 @@ let () = if typeof(packageVersion) == #undefined {
 
 module Bindings = FrontmanBindings
 module Hosts = FrontmanAiFrontmanCore.FrontmanCore__Hosts
+module RepositoryRoot = FrontmanAiFrontmanCore.FrontmanCore__RepositoryRoot
 
 // Default host can be overridden via env vars for development.
 // Priority:
@@ -54,8 +55,8 @@ type t = {
   clientCssUrl: option<string>,
   entrypointUrl: option<string>,
   projectRoot: string,
-  // sourceRoot: root for file paths (monorepo root in monorepo setups)
-  // Defaults to projectRoot if not specified
+  // sourceRoot: root for file paths
+  // Defaults to the repository containing projectRoot, or projectRoot outside a repository.
   sourceRoot: string,
 }
 
@@ -92,8 +93,9 @@ let make = (
     )
     ->Option.getOr(".")
 
-  // sourceRoot defaults to projectRoot if not specified
-  let sourceRoot = sourceRoot->Option.getOr(projectRoot)
+  let sourceRoot = sourceRoot->Option.getOr(
+    RepositoryRoot.resolve(projectRoot),
+  )
 
   // Client URL can be overridden via FRONTMAN_CLIENT_URL env var for remote development
   let clientUrl = clientUrl->Option.getOr({

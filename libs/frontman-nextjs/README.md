@@ -262,6 +262,7 @@ createMiddleware({
   clientCssUrl: string,        // Custom client CSS URL
   entrypointUrl: string,       // Custom entrypoint URL
   projectRoot: string,         // Project root directory (default: process.cwd())
+  sourceRoot: string,          // File access root (default: enclosing repository root)
 })
 ```
 
